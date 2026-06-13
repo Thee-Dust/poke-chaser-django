@@ -18,6 +18,7 @@ class CardSet(BaseModel):
     class Meta:
         verbose_name = "set"
         verbose_name_plural = "sets"
+        ordering = ["-release_date", "name"]
 
     def __str__(self):
         return self.name
@@ -46,6 +47,7 @@ class Card(BaseModel):
     images = models.JSONField(default=dict)
     tcgplayer = models.JSONField(null=True, blank=True)
     cardmarket = models.JSONField(null=True, blank=True)
+    
 
     def __str__(self):
         return self.name
