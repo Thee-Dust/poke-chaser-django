@@ -1,0 +1,46 @@
+services:
+  postgres:
+    image: postgres:15
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+
+  redis:
+    image: redis:alpine
+
+  # sftp:
+  #   build: ./sftp
+  #   volumes:
+  #     - ./data/sftp:/home/sftpdev/data
+
+  mailhog:
+    image: mailhog/mailhog
+    platform: linux/amd64
+    ports:
+      - "8025:8025"
+
+  app:
+    build: .
+    command: python manage.py runserver 0.0.0.0:8000
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: postgres
+      REDIS_HOST: redis
+      EMAIL_HOST: mailhog
+    depends_on:
+      - postgres
+      - redis
+      - mailhog
+
+volumes:
+  postgres_data:

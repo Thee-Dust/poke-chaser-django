@@ -1,0 +1,10 @@
+#!/bin/bash
+set -e
+
+docker compose build
+docker compose run --rm app python manage.py migrate
+
+echo "CREATE SUPER USER (fill in details for local admin)..."
+docker compose run --rm app python manage.py createsuperuser
+
+echo "DONE :)"
