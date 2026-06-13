@@ -9,6 +9,12 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
 
   redis:
     image: redis:alpine
@@ -38,9 +44,40 @@ services:
       REDIS_HOST: redis
       EMAIL_HOST: mailhog
     depends_on:
-      - postgres
-      - redis
-      - mailhog
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      mailhog:
+        condition: service_started
+
+  worker: &worker
+    build: .
+    command: celery -A pokechaser worker -l INFO
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: postgres
+      REDIS_HOST: redis
+      EMAIL_HOST: mailhog
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  beat:
+    <<: *worker
+    command: celery -A pokechaser beat -l INFO
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      worker:
+        condition: service_started
 
 volumes:
   postgres_data:

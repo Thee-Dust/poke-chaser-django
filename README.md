@@ -109,8 +109,8 @@ POSTGRES_HOST=localhost EMAIL_HOST=localhost python manage.py runserver
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `POSTGRES_DB` | Database name | `poke_chaser` |
-| `POSTGRES_USER` | Database user | `poke_chaser` |
-| `POSTGRES_PASSWORD` | Database password | — |
+| `POSTGRES_USER` | Database user | `postgres` |
+| `POSTGRES_PASSWORD` | Database password | `postgres` |
 | `POSTGRES_HOST` | DB host (`postgres` in Compose, `localhost` on host) | `postgres` |
 | `POSTGRES_PORT` | Database port | `5432` |
 | `REDIS_HOST` | Redis host | `redis` |
