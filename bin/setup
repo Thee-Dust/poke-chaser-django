@@ -1,0 +1,16 @@
+#!/bin/bash
+set -e
+
+wait_for_postgres() {
+  echo "Waiting for Postgres to be ready..."
+  docker compose up -d postgres --wait
+}
+
+docker compose build
+wait_for_postgres
+docker compose run --rm app python manage.py migrate
+
+echo "CREATE SUPER USER (fill in details for local admin)..."
+docker compose run --rm app python manage.py createsuperuser
+
+echo "DONE :)"
