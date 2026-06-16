@@ -18,6 +18,7 @@ class CardSet(BaseModel):
     class Meta:
         verbose_name = "set"
         verbose_name_plural = "sets"
+        ordering = ["-release_date", "name"]
 
     def __str__(self):
         return self.name
@@ -29,9 +30,14 @@ class Card(BaseModel):
     name = models.CharField(max_length=255)
     supertype = models.CharField(max_length=50)
     subtypes = models.JSONField(default=list)
+    level = models.CharField(max_length=10, blank=True)
     hp = models.CharField(max_length=10, blank=True)
     types = models.JSONField(default=list)
     evolves_from = models.CharField(max_length=255, blank=True)
+    evolves_to = models.JSONField(default=list)
+    rules = models.JSONField(default=list)
+    ancient_trait = models.JSONField(null=True, blank=True)
+    abilities = models.JSONField(default=list)
     attacks = models.JSONField(default=list)
     weaknesses = models.JSONField(default=list)
     resistances = models.JSONField(default=list)
@@ -40,12 +46,14 @@ class Card(BaseModel):
     number = models.CharField(max_length=20)
     artist = models.CharField(max_length=255, blank=True)
     rarity = models.CharField(max_length=100, blank=True)
+    regulation_mark = models.CharField(max_length=10, blank=True)
     flavor_text = models.TextField(blank=True)
     national_pokedex_numbers = models.JSONField(default=list)
     legalities = models.JSONField(default=dict)
     images = models.JSONField(default=dict)
     tcgplayer = models.JSONField(null=True, blank=True)
     cardmarket = models.JSONField(null=True, blank=True)
+    
 
     def __str__(self):
         return self.name
