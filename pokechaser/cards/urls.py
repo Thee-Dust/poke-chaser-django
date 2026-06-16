@@ -5,6 +5,7 @@ from . import views
 
 router = routers.DefaultRouter()
 router.register(r"cardSet", views.CardSetViewSet, basename="cardset")
+router.register(r"card", views.CardViewSet, basename="card")
 
 
 urlpatterns = [
