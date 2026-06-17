@@ -2,6 +2,7 @@ from django.contrib.auth import login, logout
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import ensure_csrf_cookie
 from rest_framework import status
+from rest_framework.exceptions import Throttled
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -21,6 +22,12 @@ class RegisterView(APIView):
     permission_classes = [AllowAny]
     throttle_scope = "register"
 
+    def throttled(self, request, wait):
+        raise Throttled(
+            wait,
+            detail="Too many registration attempts. Please try again later.",
+        )
+
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -31,6 +38,12 @@ class RegisterView(APIView):
 class LoginView(APIView):
     permission_classes = [AllowAny]
     throttle_scope = "login"
+
+    def throttled(self, request, wait):
+        raise Throttled(
+            wait,
+            detail="Too many login attempts. Please try again later.",
+        )
 
     def post(self, request):
         serializer = LoginSerializer(data=request.data, context={"request": request})

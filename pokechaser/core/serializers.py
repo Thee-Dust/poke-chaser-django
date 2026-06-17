@@ -1,9 +1,13 @@
 from django.contrib.auth import authenticate
 from django.contrib.auth.password_validation import validate_password
+from django.contrib.auth.validators import UnicodeUsernameValidator
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db.models import Q
 from rest_framework import serializers
 
 from .models import User
+
+username_validator = UnicodeUsernameValidator()
 
 
 class RegisterSerializer(serializers.Serializer):
@@ -17,12 +21,19 @@ class RegisterSerializer(serializers.Serializer):
         return value.lower()
 
     def validate_username(self, value):
+        try:
+            username_validator(value)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(list(exc.messages))
         if User.objects.filter(username__iexact=value).exists():
             raise serializers.ValidationError("A user with this username already exists.")
         return value
 
     def validate_password(self, value):
-        validate_password(value)
+        try:
+            validate_password(value)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(list(exc.messages))
         return value
 
     def create(self, validated_data):
@@ -54,7 +65,7 @@ class LoginSerializer(serializers.Serializer):
 
         if user is None:
             raise serializers.ValidationError(
-                {"non_field_errors": ["Invalid credentials."]},
+                {"non_field_errors": ["Email or username and password are incorrect."]},
                 code="authentication",
             )
 
