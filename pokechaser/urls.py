@@ -21,4 +21,5 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("auth/", include("pokechaser.core.urls")),
     path("cards/", include("pokechaser.cards.urls")),
+    path("collections/", include("pokechaser.collections.urls")),
 ]

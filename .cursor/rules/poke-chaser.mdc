@@ -1,0 +1,37 @@
+---
+description: Core guardrails and conventions for the Poke Chaser React app
+alwaysApply: true
+---
+
+# Poke Chaser — Core Guardrails
+
+## Never commit or push
+
+Do NOT run `git commit`, `git push`, or any git staging command unless the user explicitly asks. Never change `git config`.
+
+## Clean code
+
+- Small, focused components. No comments that narrate what the code does.
+- Reuse existing components: `Pagination`, `CardGrid`, `SetGrid`, `CardTile`, `SetTile`.
+- Use existing CSS custom properties (`--accent`, `--border`, `--text-h`, `--bg`, etc.) from `index.css`.
+- Add page-specific classes instead of modifying shared ones (e.g. `set-detail__header` not `page__actions`).
+
+## Don't over-engineer
+
+Keep small lists inline in the file that uses them — no separate util files for sort options or labels.
+
+## Data layer
+
+- All API calls go through `dataProvider.ts`, accessed via `useData()`.
+- Use API field names as-is — snake_case (`release_date`, `set_name`, `set_id`). No client-side mapping.
+- Never add `isMockMode()` branches to `getSets` or `getCardsBySet`. Always hit the API.
+- No client-side re-sorting of results.
+- Pagination: `page` query param. Sorting: plain `sort` query param (e.g. `sort=release_date_desc`).
+
+## Type safety
+
+Mirror API JSON in `src/api/types.ts` using snake_case field names. Mark optional fields with `?`. Do not add `imageUrl`, `setId`, or other camelCase aliases for API fields.
+
+## Verify before done
+
+After substantive edits, run `npm run build` (TypeScript + Vite). Fix any errors introduced. Check lints with `npm run lint`.
