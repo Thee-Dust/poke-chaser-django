@@ -12,3 +12,4 @@ class CardSetAdmin(admin.ModelAdmin):
 class CardAdmin(admin.ModelAdmin):
     list_display = ("id", "name", "set", "supertype", "rarity")
     list_filter = ("set", "supertype")
+    search_fields = ("id", "name")
