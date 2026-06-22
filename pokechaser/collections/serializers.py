@@ -36,27 +36,6 @@ class CollectionListSerializer(CollectionSerializer):
         return str(total)
 
 
-class CollectionDetailSerializer(CollectionListSerializer):
-    """Detail serializer — adds total_spent and gain_loss."""
-    total_spent = serializers.SerializerMethodField()
-    gain_loss = serializers.SerializerMethodField()
-
-    class Meta(CollectionListSerializer.Meta):
-        fields = CollectionListSerializer.Meta.fields + ["total_spent", "gain_loss"]
-
-    def get_total_spent(self, obj):
-        result = CollectionItemPurchase.objects.filter(
-            item__collection=obj
-        ).aggregate(total=Sum("purchase_price"))
-        total = result["total"]
-        return str(total) if total is not None else "0.00"
-
-    def get_gain_loss(self, obj):
-        market = Decimal(self.get_total_market_value(obj))
-        spent = Decimal(self.get_total_spent(obj))
-        return str(market - spent)
-
-
 class CollectionItemPurchaseSerializer(serializers.ModelSerializer):
     class Meta:
         model = CollectionItemPurchase
@@ -114,3 +93,25 @@ class CollectionItemSerializer(serializers.ModelSerializer):
             p.purchase_price for p in obj.purchases.all() if p.purchase_price is not None
         )
         return str(market - (spent or Decimal("0.00")))
+
+
+class CollectionDetailSerializer(CollectionListSerializer):
+    """Detail serializer — adds total_spent, gain_loss, and items."""
+    items = CollectionItemSerializer(many=True, read_only=True)
+    total_spent = serializers.SerializerMethodField()
+    gain_loss = serializers.SerializerMethodField()
+
+    class Meta(CollectionListSerializer.Meta):
+        fields = CollectionListSerializer.Meta.fields + ["total_spent", "gain_loss", "items"]
+
+    def get_total_spent(self, obj):
+        result = CollectionItemPurchase.objects.filter(
+            item__collection=obj
+        ).aggregate(total=Sum("purchase_price"))
+        total = result["total"]
+        return str(total) if total is not None else "0.00"
+
+    def get_gain_loss(self, obj):
+        market = Decimal(self.get_total_market_value(obj))
+        spent = Decimal(self.get_total_spent(obj))
+        return str(market - spent)

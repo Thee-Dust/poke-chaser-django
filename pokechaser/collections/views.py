@@ -1,4 +1,5 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db.models import Prefetch
 from django.shortcuts import get_object_or_404
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
@@ -38,7 +39,17 @@ class CollectionViewSet(viewsets.ModelViewSet):
     http_method_names = ["get", "post", "patch", "delete", "head", "options"]
 
     def get_queryset(self):
-        return Collection.objects.filter(user=self.request.user)
+        qs = Collection.objects.filter(user=self.request.user)
+        if self.action == "retrieve":
+            qs = qs.prefetch_related(
+                Prefetch(
+                    "items",
+                    queryset=CollectionItem.objects.select_related(
+                        "card", "card__set"
+                    ).prefetch_related("purchases"),
+                )
+            )
+        return qs
 
     def get_serializer_class(self):
         if self.action == "list":
