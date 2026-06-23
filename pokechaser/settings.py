@@ -50,6 +50,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     "pokechaser.core",
     "pokechaser.cards",
+    "pokechaser.collections",
     "django_celery_beat",
     "rest_framework"
 ]
