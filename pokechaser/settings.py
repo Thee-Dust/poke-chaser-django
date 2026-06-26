@@ -51,6 +51,7 @@ INSTALLED_APPS = [
     "pokechaser.core",
     "pokechaser.cards",
     "pokechaser.collections",
+    "pokechaser.binders",
     "django_celery_beat",
     "rest_framework"
 ]
