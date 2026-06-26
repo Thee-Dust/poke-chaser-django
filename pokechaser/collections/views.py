@@ -9,7 +9,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from pokechaser.cards.models import Card
-from pokechaser.cards.views import PaginatedResponse
+from pokechaser.cards.views import PaginatedResponse, sort_cards
 from pokechaser.collections.models import Collection, CollectionItem, CollectionItemPurchase
 from pokechaser.collections.serializers import (
     CollectionSerializer,
@@ -41,14 +41,13 @@ class CollectionViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         qs = Collection.objects.filter(user=self.request.user)
         if self.action == "retrieve":
-            qs = qs.prefetch_related(
-                Prefetch(
-                    "items",
-                    queryset=CollectionItem.objects.select_related(
-                        "card", "card__set"
-                    ).prefetch_related("purchases"),
-                )
+            sort = self.request.query_params.get("sort", "price_desc")
+            items_qs = sort_cards(
+                CollectionItem.objects.select_related("card", "card__set").prefetch_related("purchases"),
+                sort,
+                prefix="card__",
             )
+            qs = qs.prefetch_related(Prefetch("items", queryset=items_qs))
         return qs
 
     def get_serializer_class(self):
@@ -74,10 +73,11 @@ class CollectionViewSet(viewsets.ModelViewSet):
         collection = self.get_object()
 
         if request.method == "GET":
-            queryset = (
-                collection.items
-                .select_related("card", "card__set")
-                .prefetch_related("purchases")
+            sort = request.query_params.get("sort", "price_desc")
+            queryset = sort_cards(
+                collection.items.select_related("card", "card__set").prefetch_related("purchases"),
+                sort,
+                prefix="card__",
             )
             page = self.paginate_queryset(queryset)
             serializer = CollectionItemSerializer(page, many=True)
@@ -87,19 +87,43 @@ class CollectionViewSet(viewsets.ModelViewSet):
         if not card_id:
             raise DRFValidationError({"card_id": ["This field is required."]})
 
-        card = get_object_or_404(Card, id=card_id)
-        item, created = CollectionItem.objects.get_or_create(collection=collection, card=card)
+        quantity = request.data.get("quantity", 1)
+        try:
+            quantity = int(quantity)
+        except (TypeError, ValueError):
+            raise DRFValidationError({"quantity": ["Must be a positive integer."]})
+        if quantity < 1:
+            raise DRFValidationError({"quantity": ["Must be at least 1."]})
 
-        purchases_data = request.data.get("purchases")
-        if purchases_data:
-            for p in purchases_data:
-                CollectionItemPurchase.objects.create(
-                    item=item,
-                    acquired_date=p.get("acquired_date"),
-                    purchase_price=p.get("purchase_price"),
+        purchases_data = request.data.get("purchases") or []
+        if len(purchases_data) > quantity:
+            raise DRFValidationError(
+                {"purchases": [f"Cannot have more purchase records ({len(purchases_data)}) than quantity ({quantity})."]}
+            )
+
+        card = get_object_or_404(Card, id=card_id)
+        item, created = CollectionItem.objects.get_or_create(
+            collection=collection,
+            card=card,
+            defaults={"quantity": quantity},
+        )
+
+        if not created:
+            new_quantity = item.quantity + quantity
+            existing_purchases = item.purchases.count()
+            if existing_purchases + len(purchases_data) > new_quantity:
+                raise DRFValidationError(
+                    {"purchases": ["Total purchase records would exceed the updated quantity."]}
                 )
-        else:
-            CollectionItemPurchase.objects.create(item=item, acquired_date=None, purchase_price=None)
+            item.quantity = new_quantity
+            item.save(update_fields=["quantity"])
+
+        for p in purchases_data:
+            CollectionItemPurchase.objects.create(
+                item=item,
+                acquired_date=p.get("acquired_date"),
+                purchase_price=p.get("purchase_price"),
+            )
 
         item.refresh_from_db()
         serializer = CollectionItemSerializer(
@@ -113,6 +137,30 @@ class CollectionViewSet(viewsets.ModelViewSet):
 class CollectionItemDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
+    def patch(self, request, collection_pk, item_pk):
+        item = _get_item(request, collection_pk, item_pk)
+        quantity = request.data.get("quantity")
+        if quantity is None:
+            raise DRFValidationError({"quantity": ["This field is required."]})
+        try:
+            quantity = int(quantity)
+        except (TypeError, ValueError):
+            raise DRFValidationError({"quantity": ["Must be a positive integer."]})
+        if quantity < 1:
+            raise DRFValidationError({"quantity": ["Must be at least 1."]})
+        if item.purchases.count() > quantity:
+            raise DRFValidationError(
+                {"quantity": ["Cannot be less than the number of existing purchase records."]}
+            )
+        item.quantity = quantity
+        item.save(update_fields=["quantity"])
+        serializer = CollectionItemSerializer(
+            CollectionItem.objects.select_related("card", "card__set")
+            .prefetch_related("purchases")
+            .get(pk=item.pk)
+        )
+        return Response(serializer.data)
+
     def delete(self, request, collection_pk, item_pk):
         item = _get_item(request, collection_pk, item_pk)
         item.delete()
@@ -124,6 +172,10 @@ class CollectionItemPurchaseListView(APIView):
 
     def post(self, request, collection_pk, item_pk):
         item = _get_item(request, collection_pk, item_pk)
+        if item.purchases.count() >= item.quantity:
+            raise DRFValidationError(
+                {"purchases": [f"Cannot add more purchase records. Item quantity is {item.quantity}."]}
+            )
         serializer = CollectionItemPurchaseSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         serializer.save(item=item)

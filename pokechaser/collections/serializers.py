@@ -25,14 +25,14 @@ class CollectionListSerializer(CollectionSerializer):
         fields = CollectionSerializer.Meta.fields + ["card_count", "total_market_value"]
 
     def get_card_count(self, obj):
-        return obj.items.count()
+        return obj.items.aggregate(total=Sum("quantity"))["total"] or 0
 
     def get_total_market_value(self, obj):
         total = Decimal("0.00")
-        for item in obj.items.select_related("card").prefetch_related("purchases"):
+        for item in obj.items.select_related("card"):
             price = get_tcgplayer_market_price(item.card)
             if price is not None:
-                total += Decimal(str(price)) * len(item.purchases.all())
+                total += Decimal(str(price)) * item.quantity
         return str(total)
 
 
@@ -62,7 +62,7 @@ class CollectionItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = CollectionItem
         fields = [
-            "id", "card", "purchases",
+            "id", "card", "quantity", "purchases",
             "market_price", "market_value", "total_spent", "gain_loss",
             "created_at", "updated_at",
         ]
@@ -76,7 +76,7 @@ class CollectionItemSerializer(serializers.ModelSerializer):
         price = get_tcgplayer_market_price(obj.card)
         if price is None:
             return None
-        return str(Decimal(str(price)) * len(obj.purchases.all()))
+        return str(Decimal(str(price)) * obj.quantity)
 
     def get_total_spent(self, obj):
         total = sum(
@@ -85,24 +85,29 @@ class CollectionItemSerializer(serializers.ModelSerializer):
         return str(total) if total else "0.00"
 
     def get_gain_loss(self, obj):
+        purchases = obj.purchases.all()
+        purchase_count = len(purchases)
+        if purchase_count == 0:
+            return None
         price = get_tcgplayer_market_price(obj.card)
         if price is None:
             return None
-        market = Decimal(str(price)) * len(obj.purchases.all())
-        spent = sum(
-            p.purchase_price for p in obj.purchases.all() if p.purchase_price is not None
-        )
+        market = Decimal(str(price)) * purchase_count
+        spent = sum(p.purchase_price for p in purchases if p.purchase_price is not None)
         return str(market - (spent or Decimal("0.00")))
 
 
 class CollectionDetailSerializer(CollectionListSerializer):
-    """Detail serializer — adds total_spent, gain_loss, and items."""
+    """Detail serializer — adds total_spent, purchased_market_value, gain_loss, and items."""
     items = CollectionItemSerializer(many=True, read_only=True)
     total_spent = serializers.SerializerMethodField()
+    purchased_market_value = serializers.SerializerMethodField()
     gain_loss = serializers.SerializerMethodField()
 
     class Meta(CollectionListSerializer.Meta):
-        fields = CollectionListSerializer.Meta.fields + ["total_spent", "gain_loss", "items"]
+        fields = CollectionListSerializer.Meta.fields + [
+            "total_spent", "purchased_market_value", "gain_loss", "items"
+        ]
 
     def get_total_spent(self, obj):
         result = CollectionItemPurchase.objects.filter(
@@ -111,7 +116,18 @@ class CollectionDetailSerializer(CollectionListSerializer):
         total = result["total"]
         return str(total) if total is not None else "0.00"
 
+    def _purchased_market(self, obj):
+        """Market value of only copies that have purchase records."""
+        total = Decimal("0.00")
+        for item in obj.items.select_related("card").prefetch_related("purchases"):
+            price = get_tcgplayer_market_price(item.card)
+            if price is not None:
+                total += Decimal(str(price)) * item.purchases.count()
+        return total
+
+    def get_purchased_market_value(self, obj):
+        return str(self._purchased_market(obj))
+
     def get_gain_loss(self, obj):
-        market = Decimal(self.get_total_market_value(obj))
         spent = Decimal(self.get_total_spent(obj))
-        return str(market - spent)
+        return str(self._purchased_market(obj) - spent)
