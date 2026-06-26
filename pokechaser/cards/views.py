@@ -59,18 +59,18 @@ def search_cards(queryset, search):
     )
 
 
-def sort_cards(queryset, sort):
-    number_order = (Length("number"), "number")
+def sort_cards(queryset, sort, prefix=""):
+    number_order = (Length(f"{prefix}number"), f"{prefix}number")
     if sort == "name_asc":
-        return queryset.order_by("name")
+        return queryset.order_by(f"{prefix}name")
     if sort == "name_desc":
-        return queryset.order_by("-name")
+        return queryset.order_by(f"-{prefix}name")
     if sort in ("price_desc", "price_asc"):
         queryset = queryset.annotate(
             market_price=Coalesce(
-                F("tcgplayer__prices__normal__market"),
-                F("tcgplayer__prices__holofoil__market"),
-                F("tcgplayer__prices__reverseHolofoil__market"),
+                F(f"{prefix}tcgplayer__prices__normal__market"),
+                F(f"{prefix}tcgplayer__prices__holofoil__market"),
+                F(f"{prefix}tcgplayer__prices__reverseHolofoil__market"),
                 Value(None),
                 output_field=FloatField(),
             )

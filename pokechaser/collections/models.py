@@ -37,6 +37,7 @@ class CollectionItem(BaseModel):
         on_delete=models.CASCADE,
         related_name="collection_items",
     )
+    quantity = models.PositiveIntegerField(default=1)
 
     class Meta:
         constraints = [
