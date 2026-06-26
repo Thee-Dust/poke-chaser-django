@@ -30,7 +30,19 @@ class BinderPageSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = BinderPage
-        fields = ["id", "name", "order", "rows", "cols", "capacity", "slots", "created_at", "updated_at"]
+        fields = ["id", "name", "order", "capacity", "slots", "created_at", "updated_at"]
+        read_only_fields = ["id", "capacity", "created_at", "updated_at"]
+
+    def get_capacity(self, obj):
+        return obj.capacity
+
+
+class BinderSerializer(serializers.ModelSerializer):
+    capacity = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Binder
+        fields = ["id", "name", "rows", "cols", "capacity", "created_at", "updated_at"]
         read_only_fields = ["id", "capacity", "created_at", "updated_at"]
 
     def get_capacity(self, obj):
@@ -44,13 +56,6 @@ class BinderPageSerializer(serializers.ModelSerializer):
                 {"rows/cols": [f"Grid size {rows}x{cols} is not allowed. Choose one of: {_GRID_DISPLAY}."]}
             )
         return data
-
-
-class BinderSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Binder
-        fields = ["id", "name", "created_at", "updated_at"]
-        read_only_fields = ["id", "created_at", "updated_at"]
 
 
 class BinderListSerializer(BinderSerializer):

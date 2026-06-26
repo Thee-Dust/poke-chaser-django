@@ -24,49 +24,73 @@ def _slots_qs():
     return BinderSlot.objects.select_related("card", "card__set")
 
 
-def _resize_page(page, new_rows, new_cols):
+def _pages_qs():
+    return BinderPage.objects.select_related("binder").prefetch_related(
+        Prefetch("slots", queryset=_slots_qs())
+    )
+
+
+def _overflow_page(page, new_capacity):
     """
-    Update a page's grid size. If the new capacity is smaller than the
-    current number of filled slots, overflow cards are moved to new pages
-    inserted immediately after the current page (inheriting the new size).
-    All DB writes are wrapped in a single atomic transaction.
+    If any slots on `page` sit at position >= new_capacity, move them to
+    new pages inserted immediately after the current page.
+    The binder's rows/cols are already updated before this is called.
+    """
+    overflow_slots = list(
+        page.slots.filter(position__gte=new_capacity).order_by("position")
+    )
+    if not overflow_slots:
+        return
+
+    num_new_pages = math.ceil(len(overflow_slots) / new_capacity)
+
+    BinderPage.objects.filter(
+        binder=page.binder,
+        order__gt=page.order,
+    ).update(order=F("order") + num_new_pages)
+
+    for chunk_idx in range(num_new_pages):
+        chunk = overflow_slots[chunk_idx * new_capacity:(chunk_idx + 1) * new_capacity]
+        new_page = BinderPage.objects.create(
+            binder=page.binder,
+            name="",
+            order=page.order + chunk_idx + 1,
+        )
+        for new_position, slot in enumerate(chunk):
+            slot.page = new_page
+            slot.position = new_position
+            slot.save(update_fields=["page", "position"])
+
+
+def _resize_binder(binder, new_rows, new_cols):
+    """
+    Update the binder's grid size. For each existing page, any slots beyond
+    the new capacity overflow into new pages inserted right after that page.
+    All writes run in a single atomic transaction.
     """
     new_capacity = new_rows * new_cols
 
     with transaction.atomic():
-        overflow_slots = list(
-            page.slots.filter(position__gte=new_capacity).order_by("position")
+        binder.rows = new_rows
+        binder.cols = new_cols
+        binder.save(update_fields=["rows", "cols", "updated_at"])
+
+        # Snapshot PKs in order before any order shifts occur.
+        page_pks = list(
+            BinderPage.objects.filter(binder=binder).order_by("order").values_list("pk", flat=True)
         )
-
-        if overflow_slots:
-            num_new_pages = math.ceil(len(overflow_slots) / new_capacity)
-
-            BinderPage.objects.filter(
-                binder=page.binder,
-                order__gt=page.order,
-            ).update(order=F("order") + num_new_pages)
-
-            for chunk_idx in range(num_new_pages):
-                chunk = overflow_slots[chunk_idx * new_capacity:(chunk_idx + 1) * new_capacity]
-                new_page = BinderPage.objects.create(
-                    binder=page.binder,
-                    name="",
-                    order=page.order + chunk_idx + 1,
-                    rows=new_rows,
-                    cols=new_cols,
-                )
-                for new_position, slot in enumerate(chunk):
-                    slot.page = new_page
-                    slot.position = new_position
-                    slot.save(update_fields=["page", "position"])
-
-        page.rows = new_rows
-        page.cols = new_cols
-        page.save(update_fields=["rows", "cols", "updated_at"])
+        for pk in page_pks:
+            page = BinderPage.objects.select_related("binder").get(pk=pk)
+            _overflow_page(page, new_capacity)
 
 
-def _pages_qs():
-    return BinderPage.objects.prefetch_related(Prefetch("slots", queryset=_slots_qs()))
+def _get_binder(request, binder_pk):
+    return get_object_or_404(Binder, pk=binder_pk, user=request.user)
+
+
+def _get_page(request, binder_pk, pk):
+    binder = _get_binder(request, binder_pk)
+    return get_object_or_404(BinderPage, pk=pk, binder=binder)
 
 
 class BinderViewSet(viewsets.ModelViewSet):
@@ -89,14 +113,27 @@ class BinderViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
 
+    def partial_update(self, request, *args, **kwargs):
+        binder = self.get_object()
+        serializer = BinderSerializer(binder, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
 
-def _get_binder(request, binder_pk):
-    return get_object_or_404(Binder, pk=binder_pk, user=request.user)
+        new_rows = serializer.validated_data.get("rows", binder.rows)
+        new_cols = serializer.validated_data.get("cols", binder.cols)
+        grid_changing = (new_rows, new_cols) != (binder.rows, binder.cols)
 
+        if grid_changing:
+            non_grid = {k: v for k, v in serializer.validated_data.items() if k not in ("rows", "cols")}
+            if non_grid:
+                for attr, value in non_grid.items():
+                    setattr(binder, attr, value)
+                binder.save(update_fields=list(non_grid.keys()) + ["updated_at"])
+            _resize_binder(binder, new_rows, new_cols)
+        else:
+            serializer.save()
 
-def _get_page(request, binder_pk, pk):
-    binder = _get_binder(request, binder_pk)
-    return get_object_or_404(BinderPage, pk=pk, binder=binder)
+        binder.refresh_from_db()
+        return Response(BinderSerializer(binder).data)
 
 
 class BinderPageListView(APIView):
@@ -104,7 +141,9 @@ class BinderPageListView(APIView):
 
     def get(self, request, binder_pk):
         binder = _get_binder(request, binder_pk)
-        pages = binder.pages.prefetch_related(Prefetch("slots", queryset=_slots_qs()))
+        pages = binder.pages.select_related("binder").prefetch_related(
+            Prefetch("slots", queryset=_slots_qs())
+        )
         serializer = BinderPageSerializer(pages, many=True)
         return Response(serializer.data)
 
@@ -135,22 +174,7 @@ class BinderPageDetailView(APIView):
         page = _get_page(request, binder_pk, pk)
         serializer = BinderPageSerializer(page, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
-
-        new_rows = serializer.validated_data.get("rows", page.rows)
-        new_cols = serializer.validated_data.get("cols", page.cols)
-        grid_changing = (new_rows, new_cols) != (page.rows, page.cols)
-
-        if grid_changing:
-            # Save non-grid fields first, then handle overflow in one transaction.
-            non_grid = {k: v for k, v in serializer.validated_data.items() if k not in ("rows", "cols")}
-            if non_grid:
-                for attr, value in non_grid.items():
-                    setattr(page, attr, value)
-                page.save(update_fields=list(non_grid.keys()) + ["updated_at"])
-            _resize_page(page, new_rows, new_cols)
-        else:
-            serializer.save()
-
+        serializer.save()
         page = _pages_qs().get(pk=page.pk)
         return Response(BinderPageSerializer(page).data)
 
@@ -165,11 +189,13 @@ class BinderSlotView(APIView):
 
     def put(self, request, binder_pk, pk, position):
         page = _get_page(request, binder_pk, pk)
+        page = BinderPage.objects.select_related("binder").get(pk=page.pk)
         if position >= page.capacity:
             raise DRFValidationError(
                 {"position": [
-                    f"Position {position} is out of bounds for a {page.rows}x{page.cols} grid "
-                    f"(valid range: 0–{page.capacity - 1})."
+                    f"Position {position} is out of bounds for a "
+                    f"{page.binder.rows}x{page.binder.cols} grid "
+                    f"(valid range: 0\u2013{page.capacity - 1})."
                 ]}
             )
         card_id = request.data.get("card_id")
