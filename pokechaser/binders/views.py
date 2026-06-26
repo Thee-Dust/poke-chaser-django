@@ -9,7 +9,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from pokechaser.binders.models import Binder, BinderPage, BinderSlot
+from pokechaser.binders.models import ALLOWED_GRID_SIZES, Binder, BinderPage, BinderSlot
 from pokechaser.binders.serializers import (
     BinderDetailSerializer,
     BinderListSerializer,
@@ -82,6 +82,24 @@ def _resize_binder(binder, new_rows, new_cols):
         for pk in page_pks:
             page = BinderPage.objects.select_related("binder").get(pk=pk)
             _overflow_page(page, new_capacity)
+
+
+class BinderSizesView(APIView):
+    permission_classes = []
+    authentication_classes = []
+
+    def get(self, request):
+        sizes = sorted(ALLOWED_GRID_SIZES)
+        data = [
+            {
+                "rows": rows,
+                "cols": cols,
+                "label": f"{rows}x{cols}",
+                "capacity": rows * cols,
+            }
+            for rows, cols in sizes
+        ]
+        return Response(data)
 
 
 def _get_binder(request, binder_pk):

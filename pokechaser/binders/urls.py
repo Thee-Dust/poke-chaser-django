@@ -6,7 +6,9 @@ from pokechaser.binders import views
 router = DefaultRouter()
 router.register(r"", views.BinderViewSet, basename="binder")
 
-urlpatterns = router.urls + [
+urlpatterns = [
+    path("sizes/", views.BinderSizesView.as_view(), name="binder-sizes"),
+] + router.urls + [
     path(
         "<int:binder_pk>/pages/",
         views.BinderPageListView.as_view(),
