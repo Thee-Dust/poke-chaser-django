@@ -21,5 +21,5 @@ class BinderAdmin(admin.ModelAdmin):
 
 @admin.register(BinderPage)
 class BinderPageAdmin(admin.ModelAdmin):
-    list_display = ["__str__", "order", "rows", "cols"]
+    list_display = ["__str__", "order"]
     inlines = [BinderSlotInline]

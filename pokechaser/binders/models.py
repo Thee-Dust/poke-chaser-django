@@ -13,12 +13,18 @@ class Binder(BaseModel):
         related_name="binders",
     )
     name = models.CharField(max_length=255)
+    rows = models.PositiveSmallIntegerField(default=3)
+    cols = models.PositiveSmallIntegerField(default=3)
 
     class Meta:
         ordering = ["name"]
 
     def __str__(self):
         return f"{self.name} ({self.user.username})"
+
+    @property
+    def capacity(self):
+        return self.rows * self.cols
 
 
 class BinderPage(BaseModel):
@@ -29,8 +35,6 @@ class BinderPage(BaseModel):
     )
     name = models.CharField(max_length=255, blank=True)
     order = models.PositiveIntegerField(default=0)
-    rows = models.PositiveSmallIntegerField(default=3)
-    cols = models.PositiveSmallIntegerField(default=3)
 
     class Meta:
         ordering = ["order"]
@@ -41,7 +45,7 @@ class BinderPage(BaseModel):
 
     @property
     def capacity(self):
-        return self.rows * self.cols
+        return self.binder.rows * self.binder.cols
 
 
 class BinderSlot(BaseModel):
