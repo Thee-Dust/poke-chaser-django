@@ -334,3 +334,47 @@ class CollectionItemPurchaseTest(TestCase):
             f"/collections/{self.collection.id}/items/{self.item_id}/purchases/{purchase_id}/"
         )
         self.assertTrue(CollectionItem.objects.filter(pk=self.item_id).exists())
+
+
+class CollectionCardsListTest(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="testuser", email="test@example.com", password="testpass123"
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.user)
+        self.collection = Collection.objects.get(user=self.user, is_default=True)
+        self.card_set = make_card_set()
+
+    def test_cards_returns_paginated_card_objects_only(self):
+        card1 = make_card("c1", "Alpha", self.card_set, number="1")
+        card2 = make_card("c2", "Beta", self.card_set, number="2")
+        CollectionItem.objects.create(collection=self.collection, card=card1, quantity=1)
+        CollectionItem.objects.create(collection=self.collection, card=card2, quantity=1)
+
+        resp = self.client.get(f"/collections/{self.collection.id}/cards/?sort=name_asc")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(len(resp.data["results"]), 2)
+        self.assertEqual(resp.data["results"][0]["name"], "Alpha")
+        self.assertEqual(resp.data["results"][1]["name"], "Beta")
+        self.assertNotIn("purchases", resp.data["results"][0])
+        self.assertIn("pagination", resp.data["meta"])
+
+    def test_cards_cannot_access_another_users_collection(self):
+        other_user = User.objects.create_user(
+            username="other", email="other@example.com", password="testpass123"
+        )
+        other_collection = Collection.objects.get(user=other_user, is_default=True)
+        resp = self.client.get(f"/collections/{other_collection.id}/cards/")
+        self.assertEqual(resp.status_code, 404)
+
+    def test_cards_search_filters_by_name(self):
+        card1 = make_card("c1", "Alpha", self.card_set, number="1")
+        card2 = make_card("c2", "Beta", self.card_set, number="2")
+        CollectionItem.objects.create(collection=self.collection, card=card1, quantity=1)
+        CollectionItem.objects.create(collection=self.collection, card=card2, quantity=1)
+
+        resp = self.client.get(f"/collections/{self.collection.id}/cards/?search=Alpha")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(len(resp.data["results"]), 1)
+        self.assertEqual(resp.data["results"][0]["name"], "Alpha")

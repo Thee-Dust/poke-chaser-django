@@ -9,7 +9,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from pokechaser.cards.models import Card
-from pokechaser.cards.views import PaginatedResponse, sort_cards
+from pokechaser.cards.serializers import CardSerializer
+from pokechaser.cards.views import PaginatedResponse, search_cards, sort_cards
 from pokechaser.collections.models import Collection, CollectionItem, CollectionItemPurchase
 from pokechaser.collections.serializers import (
     CollectionSerializer,
@@ -22,6 +23,10 @@ from pokechaser.collections.serializers import (
 
 class CollectionItemPagination(PaginatedResponse):
     page_size = 24
+
+
+class CollectionCardsPagination(PaginatedResponse):
+    page_size = 6
 
 
 def _get_collection(request, collection_pk):
@@ -132,6 +137,19 @@ class CollectionViewSet(viewsets.ModelViewSet):
             .get(pk=item.pk)
         )
         return Response(serializer.data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+    @action(detail=True, methods=["get"], pagination_class=CollectionCardsPagination)
+    def cards(self, request, pk=None):
+        collection = self.get_object()
+        sort = request.query_params.get("sort", "name_asc")
+        search = request.query_params.get("search")
+        queryset = collection.items.select_related("card", "card__set")
+        queryset = search_cards(queryset, search, prefix="card__")
+        queryset = sort_cards(queryset, sort, prefix="card__")
+        page = self.paginate_queryset(queryset)
+        cards = [item.card for item in page]
+        serializer = CardSerializer(cards, many=True)
+        return self.get_paginated_response(serializer.data)
 
 
 class CollectionItemDetailView(APIView):
