@@ -48,14 +48,14 @@ class CardSetPagination(PaginatedResponse):
 class CardPagination(PaginatedResponse):
     page_size = 24
 
-def search_cards(queryset, search):
+def search_cards(queryset, search, prefix=""):
     if not search:
         return queryset
     return queryset.filter(
-        Q(name__icontains=search)
-        | Q(set__name__icontains=search)
-        | Q(rarity__icontains=search)
-        | Q(supertype__icontains=search)
+        Q(**{f"{prefix}name__icontains": search})
+        | Q(**{f"{prefix}set__name__icontains": search})
+        | Q(**{f"{prefix}rarity__icontains": search})
+        | Q(**{f"{prefix}supertype__icontains": search})
     )
 
 
