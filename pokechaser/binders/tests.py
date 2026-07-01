@@ -105,13 +105,23 @@ class BinderCRUDTest(TestCase):
         self.assertEqual(resp.data[0]["name"], self.binder.name)
 
     def test_list_includes_page_count_and_grid(self):
-        make_page(self.binder, order=0)
-        make_page(self.binder, order=1)
+        card_set = make_card_set()
+        cards = [make_card(f"c{i}", card_set, number=str(i)) for i in range(1, 4)]
+        page_one = make_page(self.binder, order=0)
+        page_two = make_page(self.binder, order=1)
+        fill_page(page_one, cards[:2])
+        fill_page(page_two, cards[2:])
         resp = self.client.get("/binders/")
         self.assertEqual(resp.data[0]["page_count"], 2)
+        self.assertEqual(resp.data[0]["card_count"], 3)
         self.assertEqual(resp.data[0]["rows"], 3)
         self.assertEqual(resp.data[0]["cols"], 3)
         self.assertEqual(resp.data[0]["capacity"], 9)
+
+    def test_list_empty_binder_has_zero_card_count(self):
+        resp = self.client.get("/binders/")
+        self.assertEqual(resp.data[0]["page_count"], 0)
+        self.assertEqual(resp.data[0]["card_count"], 0)
 
     def test_create_binder_default_grid(self):
         resp = self.client.post("/binders/", {"name": "New Binder"}, format="json")

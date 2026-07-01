@@ -1,7 +1,7 @@
 import math
 
 from django.db import transaction
-from django.db.models import F, Max, Prefetch
+from django.db.models import Count, F, Max, Prefetch
 from django.shortcuts import get_object_or_404
 from rest_framework import status, viewsets
 from rest_framework.exceptions import ValidationError as DRFValidationError
@@ -117,8 +117,16 @@ class BinderViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = Binder.objects.filter(user=self.request.user)
-        if self.action == "retrieve":
-            qs = qs.prefetch_related(Prefetch("pages", queryset=_pages_qs()))
+        if self.action == "list":
+            qs = qs.annotate(
+                page_count=Count("pages", distinct=True),
+                card_count=Count("pages__slots"),
+            )
+        elif self.action == "retrieve":
+            qs = qs.annotate(
+                page_count=Count("pages", distinct=True),
+                card_count=Count("pages__slots"),
+            ).prefetch_related(Prefetch("pages", queryset=_pages_qs()))
         return qs
 
     def get_serializer_class(self):
