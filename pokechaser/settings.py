@@ -11,7 +11,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 import os
-from datetime import timedelta
+from celery.schedules import crontab
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -215,6 +215,6 @@ CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 CELERY_BEAT_SCHEDULE = {
     "sync_pokemon_cards": {
         "task": "pokechaser.cards.tasks.sync_pokemon_cards",
-        "schedule": timedelta(days=14),
+        "schedule": crontab(hour=0, minute=0),
     },
 }
