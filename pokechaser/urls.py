@@ -17,7 +17,10 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path, include
 
+from pokechaser.core.views import health
+
 urlpatterns = [
+    path("health/", health),
     path("admin/", admin.site.urls),
     path("auth/", include("pokechaser.core.urls")),
     path("cards/", include("pokechaser.cards.urls")),
