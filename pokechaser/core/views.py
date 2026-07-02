@@ -2,6 +2,8 @@ from django.contrib.auth import login, logout
 from django.conf import settings
 from django.contrib.auth.tokens import default_token_generator
 from django.core.mail import EmailMultiAlternatives
+from django.db import connection
+from django.http import JsonResponse
 from django.template.loader import render_to_string
 from django.utils.decorators import method_decorator
 from django.utils.encoding import force_bytes
@@ -21,6 +23,14 @@ from .serializers import (
     RegisterSerializer,
     UserSerializer,
 )
+
+
+def health(request):
+    try:
+        connection.ensure_connection()
+    except Exception:
+        return JsonResponse({"status": "error"}, status=503)
+    return JsonResponse({"status": "ok"})
 
 
 @method_decorator(ensure_csrf_cookie, name="dispatch")

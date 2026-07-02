@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare environment
+        run: cp .env.example .env
+
+      - name: Build images
+        run: docker compose build app
+
+      - name: Start dependencies
+        run: docker compose up -d postgres redis mailhog --wait
+
+      - name: Django check
+        run: docker compose run --rm app python manage.py check
+
+      - name: Run tests
+        run: docker compose run --rm app python manage.py test
