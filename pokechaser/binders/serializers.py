@@ -59,13 +59,11 @@ class BinderSerializer(serializers.ModelSerializer):
 
 
 class BinderListSerializer(BinderSerializer):
-    page_count = serializers.SerializerMethodField()
+    page_count = serializers.IntegerField(read_only=True)
+    card_count = serializers.IntegerField(read_only=True)
 
     class Meta(BinderSerializer.Meta):
-        fields = BinderSerializer.Meta.fields + ["page_count"]
-
-    def get_page_count(self, obj):
-        return obj.pages.count()
+        fields = BinderSerializer.Meta.fields + ["page_count", "card_count"]
 
 
 class BinderDetailSerializer(BinderListSerializer):
