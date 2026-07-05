@@ -1,0 +1,126 @@
+name: Deploy
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    name: Build → Push → Migrate → Deploy
+    runs-on: ubuntu-latest
+
+    env:
+      AWS_REGION: us-east-1
+      ECR_REPOSITORY: poke-chaser-api
+      ECS_CLUSTER: poke-chaser-prod
+      ECS_SERVICE: poke-chaser-api-prod
+      TASK_FAMILY: poke-chaser-api-prod
+      CONTAINER_NAME: api
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push Docker image
+        env:
+          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          IMAGE_TAG: ${{ github.ref_name }}
+        run: |
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+                     $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          echo "IMAGE=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_ENV
+
+      - name: Register new task definition revision
+        run: |
+          CURRENT=$(aws ecs describe-task-definition \
+            --task-definition $TASK_FAMILY \
+            --query taskDefinition \
+            --output json)
+          NEW=$(echo "$CURRENT" | python3 -c '
+          import json, sys, os
+          td = json.load(sys.stdin)
+          image = os.environ["IMAGE"]
+          container_name = os.environ["CONTAINER_NAME"]
+          for c in td["containerDefinitions"]:
+              if c["name"] == container_name:
+                  c["image"] = image
+          for key in [
+              "taskDefinitionArn", "revision", "status",
+              "requiresAttributes", "placementConstraints",
+              "compatibilities", "registeredAt", "registeredBy",
+              "deregisteredAt",
+          ]:
+              td.pop(key, None)
+          print(json.dumps(td))
+          ')
+          NEW_ARN=$(aws ecs register-task-definition \
+            --cli-input-json "$NEW" \
+            --query taskDefinition.taskDefinitionArn \
+            --output text)
+          echo "NEW_TASK_DEF_ARN=$NEW_ARN" >> $GITHUB_ENV
+
+      - name: Run database migrations
+        run: |
+          NETWORK=$(aws ecs describe-services \
+            --cluster $ECS_CLUSTER \
+            --services $ECS_SERVICE \
+            --query "services[0].networkConfiguration" \
+            --output json)
+
+          TASK_ARN=$(aws ecs run-task \
+            --cluster $ECS_CLUSTER \
+            --task-definition $NEW_TASK_DEF_ARN \
+            --launch-type FARGATE \
+            --network-configuration "$NETWORK" \
+            --overrides "{\"containerOverrides\":[{\"name\":\"$CONTAINER_NAME\",\"command\":[\"python\",\"manage.py\",\"migrate\",\"--noinput\"]}]}" \
+            --query "tasks[0].taskArn" \
+            --output text)
+
+          echo "Waiting for migration task $TASK_ARN to complete..."
+          aws ecs wait tasks-stopped \
+            --cluster $ECS_CLUSTER \
+            --tasks $TASK_ARN
+
+          EXIT_CODE=$(aws ecs describe-tasks \
+            --cluster $ECS_CLUSTER \
+            --tasks $TASK_ARN \
+            --query "tasks[0].containers[0].exitCode" \
+            --output text)
+
+          if [ "$EXIT_CODE" != "0" ]; then
+            echo "Migrations failed with exit code $EXIT_CODE"
+            exit 1
+          fi
+          echo "Migrations completed successfully."
+
+      - name: Update ECS service
+        run: |
+          aws ecs update-service \
+            --cluster $ECS_CLUSTER \
+            --service $ECS_SERVICE \
+            --task-definition $NEW_TASK_DEF_ARN \
+            --force-new-deployment
+
+          echo "Waiting for service to stabilize..."
+          aws ecs wait services-stable \
+            --cluster $ECS_CLUSTER \
+            --services $ECS_SERVICE
+
+          echo "Deployed ${{ github.ref_name }} successfully."

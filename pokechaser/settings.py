@@ -59,6 +59,7 @@ INSTALLED_APPS = [
 AUTH_USER_MODEL = "core.User"
 
 MIDDLEWARE = [
+    "pokechaser.core.middleware.HealthCheckMiddleware",
     'django.middleware.security.SecurityMiddleware',
     "corsheaders.middleware.CorsMiddleware",
     'django.contrib.sessions.middleware.SessionMiddleware',
