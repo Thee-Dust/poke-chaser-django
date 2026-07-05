@@ -1,8 +1,42 @@
+from unittest.mock import MagicMock, patch
+
+import requests
 from django.test import TestCase
 from rest_framework.test import APIClient
 
 from pokechaser.cards.models import Card, CardSet
+from pokechaser.cards.utils import CardApi
 from pokechaser.core.models import User
+
+
+def mock_response(status_code, json_data=None):
+    response = MagicMock()
+    response.status_code = status_code
+    if json_data is not None:
+        response.json.return_value = json_data
+    if status_code >= 400:
+        response.raise_for_status.side_effect = requests.HTTPError(response=response)
+    return response
+
+
+def api_set(set_id, name="Test Set"):
+    return {
+        "id": set_id,
+        "name": name,
+        "series": "Test Series",
+        "printedTotal": 1,
+        "total": 1,
+    }
+
+
+def api_card(card_id, set_id, name="Test Card"):
+    return {
+        "id": card_id,
+        "name": name,
+        "supertype": "Pokémon",
+        "number": "1",
+        "set": {"id": set_id},
+    }
 
 
 def make_card_set(set_id="test-set"):
@@ -109,3 +143,81 @@ class CardSetSortTest(TestCase):
         resp = self.client.get("/cards/cardSet/?sort=name_asc")
         names = [r["name"] for r in resp.data["results"]]
         self.assertEqual(names, sorted(names))
+
+
+class SyncTestCase(TestCase):
+    def setUp(self):
+        self.api = CardApi()
+        self.api.page_delay_seconds = 0
+        self.api.set_delay_seconds = 0
+
+    @patch("pokechaser.cards.utils.time.sleep")
+    @patch("pokechaser.cards.utils.requests.get")
+    def test_request_retries_on_404(self, mock_get, _mock_sleep):
+        mock_get.side_effect = [
+            mock_response(404),
+            mock_response(404),
+            mock_response(200, {"data": []}),
+        ]
+
+        result = self.api._request("https://api.pokemontcg.io/v2/cards", params={"page": 1})
+
+        self.assertEqual(result, {"data": []})
+        self.assertEqual(mock_get.call_count, 3)
+
+    @patch.object(CardApi, "_request")
+    def test_paginate_sends_order_by_id(self, mock_request):
+        mock_request.return_value = {"data": [{"id": "x1"}], "totalCount": 1}
+
+        self.api._paginate("cards", extra_params={"q": "set.id:sv8"})
+
+        params = mock_request.call_args.kwargs["params"]
+        self.assertEqual(params["orderBy"], "id")
+        self.assertEqual(params["q"], "set.id:sv8")
+
+    @patch.object(CardApi, "_request")
+    def test_paginate_deduplicates_ids(self, mock_request):
+        self.api.page_size = 2
+        mock_request.side_effect = [
+            {"data": [{"id": "c1"}, {"id": "c2"}], "totalCount": 3},
+            {"data": [{"id": "c1"}, {"id": "c3"}], "totalCount": 3},
+        ]
+
+        results = self.api._paginate("cards", extra_params={"q": "set.id:sv8"})
+
+        self.assertEqual([item["id"] for item in results], ["c1", "c2", "c3"])
+
+    @patch.object(CardApi, "_fetch_sets")
+    @patch.object(CardApi, "_fetch_cards_for_set")
+    @patch("pokechaser.cards.utils.time.sleep")
+    def test_run_saves_first_set_when_second_fails(self, _mock_sleep, mock_fetch_cards, mock_fetch_sets):
+        self.api.set_max_retries = 1
+        mock_fetch_sets.return_value = [api_set("set-a", "A"), api_set("set-b", "B")]
+
+        def fetch_side_effect(set_id):
+            if set_id == "set-a":
+                return [api_card("c1", "set-a")]
+            raise RuntimeError("API down")
+
+        mock_fetch_cards.side_effect = fetch_side_effect
+
+        with self.assertRaises(RuntimeError) as ctx:
+            self.api.run()
+
+        self.assertIn("set-b", str(ctx.exception))
+        self.assertTrue(CardSet.objects.filter(id="set-a").exists())
+        self.assertTrue(Card.objects.filter(id="c1").exists())
+        self.assertFalse(Card.objects.filter(set_id="set-b").exists())
+
+    @patch.object(CardApi, "_fetch_sets")
+    @patch.object(CardApi, "_fetch_cards_for_set")
+    def test_run_completes_when_all_sets_succeed(self, mock_fetch_cards, mock_fetch_sets):
+        mock_fetch_sets.return_value = [api_set("set-a")]
+        mock_fetch_cards.return_value = [api_card("c1", "set-a")]
+
+        stats = self.api.run()
+
+        self.assertEqual(stats["sets_created"], 1)
+        self.assertEqual(stats["cards_created"], 1)
+        mock_fetch_cards.assert_called_once_with("set-a")
+

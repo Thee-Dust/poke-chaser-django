@@ -101,7 +101,9 @@ class CardApi:
     base_url = "https://api.pokemontcg.io/v2"
     page_size = 250
     max_retries = 5
+    set_max_retries = 3
     page_delay_seconds = 1
+    set_delay_seconds = 0.5
 
     def _request(self, url, params=None):
         api_key = os.getenv("POKEMON_TCG_API_KEY", "")
@@ -127,7 +129,7 @@ class CardApi:
                 attempt += 1
                 continue
 
-            if response.status_code == 429 or response.status_code >= 500:
+            if response.status_code in (404, 429) or response.status_code >= 500:
                 if attempt == self.max_retries:
                     response.raise_for_status()
                 wait = 2 ** attempt
@@ -147,19 +149,37 @@ class CardApi:
 
         raise RuntimeError(f"Request failed after {self.max_retries} attempts")
 
-    def _paginate(self, endpoint):
+    def _paginate(self, endpoint, extra_params=None):
         url = f"{self.base_url}/{endpoint}"
         page = 1
         results = []
+        seen_ids = set()
+        query_params = extra_params or {}
         total_pages = 1
 
         while True:
-            payload = self._request(
-                url,
-                params={"page": page, "pageSize": self.page_size},
-            )
+            params = {
+                "page": page,
+                "pageSize": self.page_size,
+                "orderBy": "id",
+                **query_params,
+            }
+            payload = self._request(url, params=params)
             batch = payload.get("data", [])
-            results.extend(batch)
+
+            for item in batch:
+                item_id = item.get("id")
+                if item_id and item_id in seen_ids:
+                    logger.warning(
+                        "Duplicate %s id %s on page %s, skipping",
+                        endpoint,
+                        item_id,
+                        page,
+                    )
+                    continue
+                if item_id:
+                    seen_ids.add(item_id)
+                results.append(item)
 
             total_count = payload.get("totalCount", 0)
             total_pages = max(1, (total_count + self.page_size - 1) // self.page_size)
@@ -182,35 +202,102 @@ class CardApi:
     # --- Sync orchestration ---
 
     def run(self):
+        stats = self._empty_stats()
+        sets_failed = []
+
         logger.info("Starting sync: fetching sets...")
         sets = self._fetch_sets()
-        logger.info("Starting sync: fetching cards...")
-        cards = self._fetch_cards()
+        set_stats = self._save_sets(sets)
+        self._merge_stats(stats, set_stats)
+
+        total_sets = len(sets)
+        logger.info("Starting sync: fetching cards for %s sets...", total_sets)
+
+        for index, set_data in enumerate(sets, start=1):
+            set_id = set_data["id"]
+            try:
+                card_stats = self._sync_set(set_data, index, total_sets)
+                self._merge_stats(stats, card_stats)
+            except Exception:
+                logger.exception("Failed to sync set %s after %s attempts", set_id, self.set_max_retries)
+                sets_failed.append(set_id)
+
+            if index < total_sets:
+                time.sleep(self.set_delay_seconds)
+
         logger.info(
-            "Starting sync: saving %s sets and %s cards to database...",
-            len(sets),
-            len(cards),
+            "Sync complete: sets created=%s updated=%s, cards created=%s updated=%s skipped=%s, sets_failed=%s",
+            stats["sets_created"],
+            stats["sets_updated"],
+            stats["cards_created"],
+            stats["cards_updated"],
+            stats["cards_skipped"],
+            sets_failed,
         )
-        return self._save(sets, cards)
+
+        if sets_failed:
+            raise RuntimeError(f"Sync failed for sets: {sets_failed}")
+
+        return stats
+
+    def _sync_set(self, set_data, index, total_sets):
+        set_id = set_data["id"]
+        last_exc = None
+
+        for attempt in range(1, self.set_max_retries + 1):
+            try:
+                cards = self._fetch_cards_for_set(set_id)
+                card_stats = self._save_cards(set_id, cards)
+                logger.info(
+                    "Set %s/%s: %s — %s cards (created=%s updated=%s skipped=%s)",
+                    index,
+                    total_sets,
+                    set_id,
+                    len(cards),
+                    card_stats["cards_created"],
+                    card_stats["cards_updated"],
+                    card_stats["cards_skipped"],
+                )
+                return card_stats
+            except Exception as exc:
+                last_exc = exc
+                if attempt < self.set_max_retries:
+                    wait = 2 ** attempt
+                    logger.warning(
+                        "Set %s sync failed (attempt %s/%s): %s — retrying in %ss",
+                        set_id,
+                        attempt,
+                        self.set_max_retries,
+                        exc,
+                        wait,
+                    )
+                    time.sleep(wait)
+
+        raise last_exc
 
     def _fetch_sets(self):
         sets = self._paginate("sets")
         logger.info("Finished fetching %s sets from API", len(sets))
         return sets
 
-    def _fetch_cards(self):
-        cards = self._paginate("cards")
-        logger.info("Finished fetching %s cards from API", len(cards))
-        return cards
+    def _fetch_cards_for_set(self, set_id):
+        return self._paginate("cards", extra_params={"q": f"set.id:{set_id}"})
 
-    def _save(self, sets, cards):
-        stats = {
+    def _empty_stats(self):
+        return {
             "sets_created": 0,
             "sets_updated": 0,
             "cards_created": 0,
             "cards_updated": 0,
             "cards_skipped": 0,
         }
+
+    def _merge_stats(self, total, partial):
+        for key, value in partial.items():
+            total[key] = total.get(key, 0) + value
+
+    def _save_sets(self, sets):
+        stats = self._empty_stats()
 
         with transaction.atomic():
             logger.info("Saving %s sets...", len(sets))
@@ -224,14 +311,27 @@ class CardApi:
                 else:
                     stats["sets_updated"] += 1
 
-            set_ids = set(CardSet.objects.values_list("id", flat=True))
+        return stats
 
-            logger.info("Saving %s cards...", len(cards))
-            for index, card_data in enumerate(cards, start=1):
-                set_id = card_data.get("set", {}).get("id")
-                if not set_id or set_id not in set_ids:
+    def _save_cards(self, set_id, cards):
+        stats = self._empty_stats()
+
+        if not CardSet.objects.filter(id=set_id).exists():
+            stats["cards_skipped"] += len(cards)
+            logger.warning("Skipping %s cards: set %s not in database", len(cards), set_id)
+            return stats
+
+        with transaction.atomic():
+            for card_data in cards:
+                card_set_id = card_data.get("set", {}).get("id")
+                if card_set_id != set_id:
                     stats["cards_skipped"] += 1
-                    logger.warning("Skipping card %s: missing set %s", card_data.get("id"), set_id)
+                    logger.warning(
+                        "Skipping card %s: expected set %s, got %s",
+                        card_data.get("id"),
+                        set_id,
+                        card_set_id,
+                    )
                     continue
 
                 defaults = map_card(card_data)
@@ -246,15 +346,4 @@ class CardApi:
                 else:
                     stats["cards_updated"] += 1
 
-                if index % 1000 == 0:
-                    logger.info("Saved %s/%s cards...", index, len(cards))
-
-        logger.info(
-            "Sync complete: sets created=%s updated=%s, cards created=%s updated=%s skipped=%s",
-            stats["sets_created"],
-            stats["sets_updated"],
-            stats["cards_created"],
-            stats["cards_updated"],
-            stats["cards_skipped"],
-        )
         return stats
