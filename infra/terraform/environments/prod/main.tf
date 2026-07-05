@@ -136,6 +136,72 @@ module "iam_oidc" {
   ecs_task_role_arn      = module.ecs.task_role_arn
 }
 
+# ── Phase 4 ───────────────────────────────────────────────────────────────────
+
+module "s3_cloudfront" {
+  source = "../../modules/s3_cloudfront"
+
+  name        = var.project_name
+  environment = var.environment
+  domain      = var.domain
+  zone_id     = module.route53.zone_id
+}
+
+# IAM role for the React frontend repo — S3 sync + CloudFront invalidation only
+resource "aws_iam_role" "github_frontend_deploy" {
+  name = "${var.project_name}-github-frontend-${var.environment}"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Principal = {
+        Federated = module.iam_oidc.oidc_provider_arn
+      }
+      Action = "sts:AssumeRoleWithWebIdentity"
+      Condition = {
+        StringEquals = {
+          "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
+        }
+        StringLike = {
+          "token.actions.githubusercontent.com:sub" = "repo:${var.frontend_github_repo}:ref:refs/tags/*"
+        }
+      }
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "github_frontend_deploy" {
+  name = "${var.project_name}-github-frontend-${var.environment}"
+  role = aws_iam_role.github_frontend_deploy.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "S3Sync"
+        Effect = "Allow"
+        Action = [
+          "s3:PutObject",
+          "s3:DeleteObject",
+          "s3:GetObject",
+          "s3:ListBucket"
+        ]
+        Resource = [
+          module.s3_cloudfront.s3_bucket_arn,
+          "${module.s3_cloudfront.s3_bucket_arn}/*"
+        ]
+      },
+      {
+        Sid      = "CloudFrontInvalidate"
+        Effect   = "Allow"
+        Action   = ["cloudfront:CreateInvalidation"]
+        Resource = ["arn:aws:cloudfront::*:distribution/${module.s3_cloudfront.cloudfront_distribution_id}"]
+      }
+    ]
+  })
+}
+
 # api.pokechaser.com → ALB alias record
 resource "aws_route53_record" "api" {
   zone_id = module.route53.zone_id

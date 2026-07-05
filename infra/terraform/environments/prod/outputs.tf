@@ -74,3 +74,25 @@ output "ses_smtp_endpoint" {
   description = "SES SMTP endpoint — set EMAIL_HOST to this in ECS (already wired)"
   value       = "email-smtp.${var.aws_region}.amazonaws.com"
 }
+
+# ── Phase 4 outputs ───────────────────────────────────────────────────────────
+
+output "s3_frontend_bucket" {
+  description = "S3 bucket for React build — set as S3_BUCKET in the frontend repo's GitHub variables"
+  value       = module.s3_cloudfront.s3_bucket_name
+}
+
+output "cloudfront_distribution_id" {
+  description = "CloudFront distribution ID — set as CLOUDFRONT_DISTRIBUTION_ID in the frontend repo's GitHub variables"
+  value       = module.s3_cloudfront.cloudfront_distribution_id
+}
+
+output "cloudfront_domain_name" {
+  description = "CloudFront domain — use to verify the site before DNS propagates"
+  value       = module.s3_cloudfront.cloudfront_domain_name
+}
+
+output "github_frontend_deploy_role_arn" {
+  description = "Set as AWS_DEPLOY_ROLE_ARN in the frontend repo's GitHub variables"
+  value       = aws_iam_role.github_frontend_deploy.arn
+}

@@ -67,7 +67,13 @@ variable "api_domain" {
 # ── GitHub / CD ───────────────────────────────────────────────────────────────
 
 variable "github_repo" {
-  description = "GitHub repository in org/repo format"
+  description = "Backend GitHub repository in org/repo format"
   type        = string
   default     = "Thee-Dust/poke-chaser-django"
+}
+
+variable "frontend_github_repo" {
+  description = "Frontend GitHub repository in org/repo format"
+  type        = string
+  default     = "Thee-Dust/poke-chaser-react"
 }
