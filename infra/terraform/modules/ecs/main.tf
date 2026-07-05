@@ -68,7 +68,7 @@ resource "aws_iam_role" "task" {
 
 resource "aws_security_group" "tasks" {
   name        = "${var.name}-ecs-tasks-${var.environment}"
-  description = "ECS tasks — allow 8000 from ALB"
+  description = "ECS tasks  allow 8000 from ALB"
   vpc_id      = var.vpc_id
 
   ingress {

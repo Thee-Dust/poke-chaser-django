@@ -53,14 +53,13 @@ jobs:
             --task-definition $TASK_FAMILY \
             --query taskDefinition \
             --output json)
-
-          NEW=$(echo "$CURRENT" | python3 - <<'PY'
-          import json, sys
+          NEW=$(echo "$CURRENT" | python3 -c '
+          import json, sys, os
           td = json.load(sys.stdin)
-          import os
           image = os.environ["IMAGE"]
+          container_name = os.environ["CONTAINER_NAME"]
           for c in td["containerDefinitions"]:
-              if c["name"] == os.environ["CONTAINER_NAME"]:
+              if c["name"] == container_name:
                   c["image"] = image
           for key in [
               "taskDefinitionArn", "revision", "status",
@@ -70,14 +69,11 @@ jobs:
           ]:
               td.pop(key, None)
           print(json.dumps(td))
-          PY
-          )
-
+          ')
           NEW_ARN=$(aws ecs register-task-definition \
             --cli-input-json "$NEW" \
             --query taskDefinition.taskDefinitionArn \
             --output text)
-
           echo "NEW_TASK_DEF_ARN=$NEW_ARN" >> $GITHUB_ENV
 
       - name: Run database migrations
