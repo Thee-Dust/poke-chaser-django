@@ -227,6 +227,113 @@ The workflow now also registers and deploys worker + beat task definitions.
 
 ---
 
+## Step 5 — Phase 4: S3 + CloudFront for React frontend
+
+### Step 5a — Apply Phase 4 infrastructure
+
+```bash
+cd infra/terraform/environments/prod
+terraform apply
+```
+
+This creates:
+- Private S3 bucket `poke-chaser-frontend-prod` for built React assets
+- ACM certificate for `pokechaser.com` + `www.pokechaser.com` (DNS validated automatically)
+- CloudFront distribution (HTTPS-only, SPA 404→index.html fallback, `PriceClass_100`)
+- Route 53 A records for root and `www` → CloudFront alias
+- IAM OIDC role for the `Thee-Dust/poke-chaser-react` GitHub repo (S3 sync + CloudFront invalidation)
+
+**Note:** ACM certificate validation adds ~2 min to the first apply. CloudFront provisioning can take up to 15 minutes — Terraform waits automatically.
+
+### Step 5b — Set GitHub variables in the frontend repo
+
+After `terraform apply`, grab the outputs:
+
+```bash
+terraform output s3_frontend_bucket
+terraform output cloudfront_distribution_id
+terraform output github_frontend_deploy_role_arn
+```
+
+In `Thee-Dust/poke-chaser-react` → **Settings → Secrets and variables → Actions → Variables**, create:
+
+| Variable | Value |
+|---|---|
+| `AWS_DEPLOY_ROLE_ARN` | output of `github_frontend_deploy_role_arn` |
+| `S3_BUCKET` | output of `s3_frontend_bucket` |
+| `CLOUDFRONT_DISTRIBUTION_ID` | output of `cloudfront_distribution_id` |
+| `AWS_REGION` | `us-east-1` |
+| `VITE_API_BASE_URL` | `https://api.pokechaser.com` |
+
+### Step 5c — Add the frontend deploy workflow
+
+In `Thee-Dust/poke-chaser-react`, create `.github/workflows/deploy.yml`:
+
+```yaml
+name: Deploy
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run build
+        env:
+          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Sync to S3
+        run: aws s3 sync dist/ s3://${{ vars.S3_BUCKET }} --delete
+
+      - name: Invalidate CloudFront cache
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id ${{ vars.CLOUDFRONT_DISTRIBUTION_ID }} \
+            --paths "/*"
+```
+
+### Step 5d — First deploy
+
+Tag a release in the frontend repo to trigger the workflow:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+After it completes:
+
+1. Visit `https://pokechaser.com` — the React app should load.
+2. If you need to test before DNS propagates, visit the CloudFront domain directly:
+   ```bash
+   terraform output cloudfront_domain_name
+   ```
+
+**CORS/CSRF** are already wired: the ECS task environment has `CORS_ALLOWED_ORIGINS` and `CSRF_TRUSTED_ORIGINS` set to `https://pokechaser.com,https://www.pokechaser.com`. The API will accept requests from both domains.
+
+---
+
 ## Apply order across phases
 
 ```
