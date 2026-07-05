@@ -12,6 +12,8 @@ provider "aws" {
   region = var.aws_region
 }
 
+# ── Phase 1 ───────────────────────────────────────────────────────────────────
+
 module "vpc" {
   source = "../../modules/vpc"
 
@@ -37,6 +39,8 @@ module "rds" {
   db_name     = var.db_name
   db_username = var.db_username
   db_password = var.db_password
+
+  allowed_security_group_ids = [module.ecs.task_security_group_id]
 }
 
 module "elasticache" {
@@ -46,4 +50,88 @@ module "elasticache" {
   environment        = var.environment
   vpc_id             = module.vpc.vpc_id
   private_subnet_ids = module.vpc.private_subnet_ids
+
+  allowed_security_group_ids = [module.ecs.task_security_group_id]
+}
+
+# ── Phase 2 ───────────────────────────────────────────────────────────────────
+
+module "route53" {
+  source = "../../modules/route53"
+
+  name        = var.project_name
+  environment = var.environment
+  domain      = var.domain
+}
+
+module "alb" {
+  source = "../../modules/alb"
+
+  name              = var.project_name
+  environment       = var.environment
+  vpc_id            = module.vpc.vpc_id
+  public_subnet_ids = module.vpc.public_subnet_ids
+  zone_id           = module.route53.zone_id
+  api_domain        = var.api_domain
+}
+
+module "secrets" {
+  source = "../../modules/secrets"
+
+  name        = var.project_name
+  environment = var.environment
+
+  secret_key          = var.secret_key
+  postgres_host       = split(":", module.rds.endpoint)[0]
+  postgres_password   = var.db_password
+  redis_endpoint      = module.elasticache.endpoint
+  pokemon_tcg_api_key = var.pokemon_tcg_api_key
+}
+
+module "ecs" {
+  source = "../../modules/ecs"
+
+  name        = var.project_name
+  environment = var.environment
+  aws_region  = var.aws_region
+
+  vpc_id             = module.vpc.vpc_id
+  private_subnet_ids = module.vpc.private_subnet_ids
+
+  ecr_repository_url    = module.ecr.repository_url
+  target_group_arn      = module.alb.target_group_arn
+  alb_security_group_id = module.alb.security_group_id
+
+  secret_arns = module.secrets.arns
+
+  api_domain      = var.api_domain
+  frontend_domain = var.domain
+  db_name         = var.db_name
+  db_username     = var.db_username
+}
+
+module "iam_oidc" {
+  source = "../../modules/iam_oidc"
+
+  name        = var.project_name
+  environment = var.environment
+
+  github_repo            = var.github_repo
+  ecr_repository_arn     = module.ecr.repository_arn
+  ecs_service_arn        = "arn:aws:ecs:${var.aws_region}:*:service/${module.ecs.cluster_name}/${module.ecs.service_name}"
+  ecs_execution_role_arn = module.ecs.execution_role_arn
+  ecs_task_role_arn      = module.ecs.task_role_arn
+}
+
+# api.pokechaser.com → ALB alias record
+resource "aws_route53_record" "api" {
+  zone_id = module.route53.zone_id
+  name    = var.api_domain
+  type    = "A"
+
+  alias {
+    name                   = module.alb.alb_dns_name
+    zone_id                = module.alb.alb_zone_id
+    evaluate_target_health = true
+  }
 }

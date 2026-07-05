@@ -1,4 +1,14 @@
 # Copy this file to terraform.tfvars and fill in real values.
 # terraform.tfvars is git-ignored — never commit it.
 
+# ── RDS ───────────────────────────────────────────────────────────────────────
+
 db_password = "change-me-before-applying"
+
+# ── Application secrets ───────────────────────────────────────────────────────
+
+# Generate with: openssl rand -hex 50
+secret_key = "change-me-to-a-random-hex-string"
+
+# From https://dev.pokemontcg.io — create a free account
+pokemon_tcg_api_key = "your-pokemon-tcg-api-key"

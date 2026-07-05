@@ -95,12 +95,85 @@ Save these — they feed into Phase 2 (ECS task environment variables).
 
 ---
 
+## Step 3 — Phase 2: DNS, ALB, ECS, secrets, deploy pipeline
+
+Phase 2 is split into two applies because the ACM SSL cert needs DNS to be delegated to Route 53 before it can validate.
+
+### Step 3a — Create Route 53 hosted zone first
+
+```bash
+cd infra/terraform/environments/prod
+
+# Add the new required vars to terraform.tfvars:
+#   secret_key          = "$(openssl rand -hex 50)"
+#   pokemon_tcg_api_key = "your-key-from-dev.pokemontcg.io"
+
+terraform apply -target=module.route53
+```
+
+When complete, copy the `route53_name_servers` output (4 NS record values).
+
+**Go to your domain registrar** and replace the nameservers for `pokechaser.com` with those 4 values. Then wait 5–30 minutes for DNS propagation.
+
+Verify propagation before continuing:
+
+```bash
+dig NS pokechaser.com +short
+# Should return the 4 Route 53 NS values
+```
+
+### Step 3b — Apply everything else
+
+```bash
+terraform apply
+```
+
+This creates:
+- ACM cert for `api.pokechaser.com` (DNS-validated — takes ~1 min once NS records propagate)
+- ALB + HTTPS listener + target group
+- Secrets Manager entries (Django `SECRET_KEY`, DB password, Redis URL, TCG API key)
+- ECS cluster + task definition + service (Django on Fargate)
+- IAM OIDC provider + GitHub deploy role
+- `api.pokechaser.com` → ALB Route 53 record
+
+### Step 3c — Configure GitHub Actions
+
+After apply, note these outputs:
+
+```
+iam_oidc_role_arn            = arn:aws:iam::...
+ecs_task_security_group_id   = sg-...
+ecr_repository_url           = ...dkr.ecr.us-east-1.amazonaws.com/poke-chaser-api
+```
+
+In your GitHub repo → **Settings → Secrets and variables → Actions → Variables**, add:
+
+| Name | Value |
+|------|-------|
+| `AWS_DEPLOY_ROLE_ARN` | `iam_oidc_role_arn` from output |
+
+### Step 3d — First deploy
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+GitHub Actions `Deploy` workflow will:
+1. Build and push Docker image to ECR
+2. Run `manage.py migrate` as a one-off ECS task
+3. Update the ECS service to the new task definition
+
+**Gate:** `https://api.pokechaser.com/health/` returns `{"status": "ok"}`
+
+---
+
 ## Apply order across phases
 
 ```
 Phase 1  →  bootstrap → VPC → RDS → ElastiCache → ECR
-Phase 2  →  ECS cluster → ALB → API task → CD pipeline (OIDC)
-Phase 3  →  Celery worker + beat tasks → SES → Secrets Manager
+Phase 2  →  route53 zone → (update nameservers) → full apply → first tag deploy
+Phase 3  →  Celery worker + beat tasks → SES → Secrets Manager (email)
 Phase 4  →  S3 + CloudFront (React) → Route 53 records → ACM certs
 Phase 5  →  CloudWatch alarms, dashboards, cost budgets
 ```
