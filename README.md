@@ -217,6 +217,7 @@ docker compose ps
 | `./bin/migrate` | Run Django migrations |
 | `./bin/rebuild` | Rebuild images and run migrations |
 | `./bin/bash` | Shell into the app container |
+| `./bin/prod-run` | Run a Django management command in prod (requires AWS CLI) |
 
 ### Common commands
 
@@ -232,6 +233,7 @@ docker compose ps
 
 # Sync card catalog from Pokemon TCG API
 docker compose exec app python manage.py sync_pokemon_cards
+./bin/prod-run sync_pokemon_cards   # prod
 
 # Run test suite (91 tests)
 docker compose exec app python manage.py test

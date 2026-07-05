@@ -1,0 +1,78 @@
+#!/bin/bash
+set -euo pipefail
+
+AWS_REGION="${AWS_REGION:-us-east-1}"
+ECS_CLUSTER="${ECS_CLUSTER:-poke-chaser-prod}"
+ECS_SERVICE="${ECS_SERVICE:-poke-chaser-api-prod}"
+TASK_FAMILY="${TASK_FAMILY:-poke-chaser-api-prod}"
+CONTAINER_NAME="${CONTAINER_NAME:-api}"
+
+if [ $# -lt 1 ]; then
+  echo "Usage: $0 <manage.py-command> [args...]"
+  echo "Example: $0 sync_pokemon_cards"
+  exit 1
+fi
+
+if ! command -v aws >/dev/null 2>&1; then
+  echo "aws CLI not found. Install it and run aws configure."
+  exit 1
+fi
+
+if ! aws sts get-caller-identity --region "$AWS_REGION" >/dev/null 2>&1; then
+  echo "AWS credentials not configured. Run aws configure."
+  exit 1
+fi
+
+OVERRIDES=$(CONTAINER_NAME="$CONTAINER_NAME" python3 - "$@" <<'PY'
+import json
+import os
+import sys
+
+overrides = {
+    "containerOverrides": [{
+        "name": os.environ["CONTAINER_NAME"],
+        "command": ["python", "manage.py"] + sys.argv[1:],
+    }]
+}
+print(json.dumps(overrides))
+PY
+)
+
+NETWORK=$(aws ecs describe-services \
+  --cluster "$ECS_CLUSTER" \
+  --services "$ECS_SERVICE" \
+  --region "$AWS_REGION" \
+  --query "services[0].networkConfiguration" \
+  --output json)
+
+TASK_ARN=$(aws ecs run-task \
+  --cluster "$ECS_CLUSTER" \
+  --task-definition "$TASK_FAMILY" \
+  --launch-type FARGATE \
+  --network-configuration "$NETWORK" \
+  --region "$AWS_REGION" \
+  --overrides "$OVERRIDES" \
+  --query "tasks[0].taskArn" \
+  --output text)
+
+echo "Task: $TASK_ARN"
+
+aws ecs wait tasks-stopped \
+  --cluster "$ECS_CLUSTER" \
+  --tasks "$TASK_ARN" \
+  --region "$AWS_REGION"
+
+EXIT_CODE=$(aws ecs describe-tasks \
+  --cluster "$ECS_CLUSTER" \
+  --tasks "$TASK_ARN" \
+  --region "$AWS_REGION" \
+  --query "tasks[0].containers[0].exitCode" \
+  --output text)
+
+if [ "$EXIT_CODE" != "0" ]; then
+  echo "Command failed with exit code $EXIT_CODE"
+  echo "Check CloudWatch log group: /ecs/poke-chaser-prod"
+  exit 1
+fi
+
+echo "Command completed successfully."

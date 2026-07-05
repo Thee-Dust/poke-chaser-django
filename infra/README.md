@@ -168,6 +168,24 @@ GitHub Actions `Deploy` workflow will:
 
 ---
 
+## Running prod commands
+
+Run Django management commands in prod via a one-off ECS task:
+
+```bash
+./bin/prod-run sync_pokemon_cards
+./bin/prod-run shell -c "from pokechaser.core.models import User; print(User.objects.count())"
+```
+
+**Prerequisites:**
+
+- AWS CLI installed and configured (`aws configure`)
+- IAM permissions: `ecs:RunTask`, `ecs:DescribeServices`, `ecs:DescribeTasks`, and `iam:PassRole` on the ECS execution and task roles
+
+**Logs:** CloudWatch → log group `/ecs/poke-chaser-prod`
+
+---
+
 ## Apply order across phases
 
 ```
