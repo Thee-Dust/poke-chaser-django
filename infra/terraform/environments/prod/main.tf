@@ -54,7 +54,7 @@ module "elasticache" {
   allowed_security_group_ids = [module.ecs.task_security_group_id]
 }
 
-# ── Phase 2 ───────────────────────────────────────────────────────────────────
+# ── Phase 2 + 3 ───────────────────────────────────────────────────────────────
 
 module "route53" {
   source = "../../modules/route53"
@@ -75,6 +75,17 @@ module "alb" {
   api_domain        = var.api_domain
 }
 
+module "ses" {
+  source = "../../modules/ses"
+
+  name        = var.project_name
+  environment = var.environment
+  aws_region  = var.aws_region
+
+  domain  = var.domain
+  zone_id = module.route53.zone_id
+}
+
 module "secrets" {
   source = "../../modules/secrets"
 
@@ -86,6 +97,8 @@ module "secrets" {
   postgres_password   = var.db_password
   redis_endpoint      = module.elasticache.endpoint
   pokemon_tcg_api_key = var.pokemon_tcg_api_key
+  ses_smtp_username   = module.ses.smtp_username
+  ses_smtp_password   = module.ses.smtp_password
 }
 
 module "ecs" {
@@ -118,7 +131,7 @@ module "iam_oidc" {
 
   github_repo            = var.github_repo
   ecr_repository_arn     = module.ecr.repository_arn
-  ecs_service_arn        = "arn:aws:ecs:${var.aws_region}:*:service/${module.ecs.cluster_name}/${module.ecs.service_name}"
+  ecs_cluster_name       = module.ecs.cluster_name
   ecs_execution_role_arn = module.ecs.execution_role_arn
   ecs_task_role_arn      = module.ecs.task_role_arn
 }

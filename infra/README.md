@@ -186,6 +186,47 @@ Run Django management commands in prod via a one-off ECS task:
 
 ---
 
+## Step 4 — Phase 3: Celery worker + beat + SES email
+
+### Step 4a — Apply Phase 3 infrastructure
+
+```bash
+cd infra/terraform/environments/prod
+terraform apply
+```
+
+This creates:
+- SES domain identity for `pokechaser.com` with DKIM Route 53 records
+- SES SMTP IAM user + access key (stored in Secrets Manager as `EMAIL_HOST_USER` / `EMAIL_HOST_PASSWORD`)
+- ECS Celery worker service (`poke-chaser-worker-prod`, memory 1024 MiB)
+- ECS Celery beat service (`poke-chaser-beat-prod`, desired count = 1 — must never be >1)
+- CloudWatch log groups `/ecs/poke-chaser-worker-prod` and `/ecs/poke-chaser-beat-prod`
+
+### Step 4b — Move SES out of sandbox (one-time)
+
+By default SES can only send to verified emails. To send to arbitrary users:
+
+1. AWS Console → **SES** → **Account dashboard** → **Request production access**
+2. Fill in use case (transactional password reset). Usually approved within 24 hours.
+
+### Step 4c — Deploy Phase 3
+
+Tag a new release to trigger the Deploy workflow:
+
+```bash
+git tag v1.1.0
+git push origin v1.1.0
+```
+
+The workflow now also registers and deploys worker + beat task definitions.
+
+**Gate:**
+- CloudWatch `/ecs/poke-chaser-worker-prod` — worker starts and connects to Redis
+- CloudWatch `/ecs/poke-chaser-beat-prod` — beat logs show crontab schedule registered
+- Password reset email delivers after SES sandbox removal
+
+---
+
 ## Apply order across phases
 
 ```

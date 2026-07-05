@@ -70,3 +70,14 @@ variable "desired_count" {
   type    = number
   default = 1
 }
+
+variable "worker_cpu" {
+  type    = number
+  default = 256
+}
+
+variable "worker_memory" {
+  description = "Memory for Celery worker in MiB — bump to 1024+ if card sync OOMs"
+  type        = number
+  default     = 1024
+}

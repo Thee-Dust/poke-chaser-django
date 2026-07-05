@@ -33,3 +33,14 @@ variable "pokemon_tcg_api_key" {
   type        = string
   sensitive   = true
 }
+
+variable "ses_smtp_username" {
+  description = "SES SMTP username (IAM access key ID)"
+  type        = string
+}
+
+variable "ses_smtp_password" {
+  description = "SES SMTP password (derived from IAM secret key)"
+  type        = string
+  sensitive   = true
+}

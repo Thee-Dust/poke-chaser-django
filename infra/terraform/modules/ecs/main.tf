@@ -21,6 +21,48 @@ resource "aws_cloudwatch_log_group" "api" {
   }
 }
 
+resource "aws_cloudwatch_log_group" "worker" {
+  name              = "/ecs/${var.name}-worker-${var.environment}"
+  retention_in_days = 30
+
+  tags = {
+    Environment = var.environment
+  }
+}
+
+resource "aws_cloudwatch_log_group" "beat" {
+  name              = "/ecs/${var.name}-beat-${var.environment}"
+  retention_in_days = 30
+
+  tags = {
+    Environment = var.environment
+  }
+}
+
+locals {
+  common_environment = [
+    { name = "DJANGO_DEBUG", value = "False" },
+    { name = "DJANGO_ALLOWED_HOSTS", value = var.api_domain },
+    { name = "FRONTEND_URL", value = "https://${var.frontend_domain}" },
+    { name = "CORS_ALLOWED_ORIGINS", value = "https://${var.frontend_domain}" },
+    { name = "CSRF_TRUSTED_ORIGINS", value = "https://${var.frontend_domain}" },
+    { name = "POSTGRES_DB", value = var.db_name },
+    { name = "POSTGRES_USER", value = var.db_username },
+    { name = "POSTGRES_PORT", value = "5432" },
+    { name = "EMAIL_HOST", value = "email-smtp.${var.aws_region}.amazonaws.com" },
+    { name = "EMAIL_PORT", value = "587" },
+    { name = "EMAIL_USE_TLS", value = "True" },
+    { name = "DEFAULT_FROM_EMAIL", value = "noreply@${var.frontend_domain}" },
+  ]
+
+  common_secrets = [
+    for env_name, arn in var.secret_arns : {
+      name      = env_name
+      valueFrom = arn
+    }
+  ]
+}
+
 resource "aws_iam_role" "execution" {
   name = "${var.name}-ecs-execution-${var.environment}"
 
@@ -120,23 +162,8 @@ resource "aws_ecs_task_definition" "api" {
         "--workers", "3"
       ]
 
-      environment = [
-        { name = "DJANGO_DEBUG", value = "False" },
-        { name = "DJANGO_ALLOWED_HOSTS", value = var.api_domain },
-        { name = "FRONTEND_URL", value = "https://${var.frontend_domain}" },
-        { name = "CORS_ALLOWED_ORIGINS", value = "https://${var.frontend_domain}" },
-        { name = "CSRF_TRUSTED_ORIGINS", value = "https://${var.frontend_domain}" },
-        { name = "POSTGRES_DB", value = var.db_name },
-        { name = "POSTGRES_USER", value = var.db_username },
-        { name = "POSTGRES_PORT", value = "5432" },
-      ]
-
-      secrets = [
-        for env_name, arn in var.secret_arns : {
-          name      = env_name
-          valueFrom = arn
-        }
-      ]
+      environment = local.common_environment
+      secrets     = local.common_secrets
 
       logConfiguration = {
         logDriver = "awslogs"
@@ -174,6 +201,126 @@ resource "aws_ecs_service" "api" {
   }
 
   health_check_grace_period_seconds = 120
+
+  lifecycle {
+    ignore_changes = [task_definition]
+  }
+
+  depends_on = [aws_iam_role_policy_attachment.execution_managed]
+
+  tags = {
+    Environment = var.environment
+  }
+}
+
+resource "aws_ecs_task_definition" "worker" {
+  family                   = "${var.name}-worker-${var.environment}"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = var.worker_cpu
+  memory                   = var.worker_memory
+  execution_role_arn       = aws_iam_role.execution.arn
+  task_role_arn            = aws_iam_role.task.arn
+
+  container_definitions = jsonencode([
+    {
+      name      = "worker"
+      image     = "${var.ecr_repository_url}:latest"
+      essential = true
+
+      command = ["celery", "-A", "pokechaser", "worker", "-l", "INFO"]
+
+      environment = local.common_environment
+      secrets     = local.common_secrets
+
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = aws_cloudwatch_log_group.worker.name
+          "awslogs-region"        = var.aws_region
+          "awslogs-stream-prefix" = "ecs"
+        }
+      }
+    }
+  ])
+
+  tags = {
+    Environment = var.environment
+  }
+}
+
+resource "aws_ecs_service" "worker" {
+  name            = "${var.name}-worker-${var.environment}"
+  cluster         = aws_ecs_cluster.main.id
+  task_definition = aws_ecs_task_definition.worker.arn
+  desired_count   = 1
+  launch_type     = "FARGATE"
+
+  network_configuration {
+    subnets          = var.private_subnet_ids
+    security_groups  = [aws_security_group.tasks.id]
+    assign_public_ip = false
+  }
+
+  lifecycle {
+    ignore_changes = [task_definition]
+  }
+
+  depends_on = [aws_iam_role_policy_attachment.execution_managed]
+
+  tags = {
+    Environment = var.environment
+  }
+}
+
+resource "aws_ecs_task_definition" "beat" {
+  family                   = "${var.name}-beat-${var.environment}"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = 256
+  memory                   = 512
+  execution_role_arn       = aws_iam_role.execution.arn
+  task_role_arn            = aws_iam_role.task.arn
+
+  container_definitions = jsonencode([
+    {
+      name      = "beat"
+      image     = "${var.ecr_repository_url}:latest"
+      essential = true
+
+      command = ["celery", "-A", "pokechaser", "beat", "-l", "INFO"]
+
+      environment = local.common_environment
+      secrets     = local.common_secrets
+
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = aws_cloudwatch_log_group.beat.name
+          "awslogs-region"        = var.aws_region
+          "awslogs-stream-prefix" = "ecs"
+        }
+      }
+    }
+  ])
+
+  tags = {
+    Environment = var.environment
+  }
+}
+
+resource "aws_ecs_service" "beat" {
+  name            = "${var.name}-beat-${var.environment}"
+  cluster         = aws_ecs_cluster.main.id
+  task_definition = aws_ecs_task_definition.beat.arn
+  desired_count   = 1
+  launch_type     = "FARGATE"
+
+  network_configuration {
+    subnets          = var.private_subnet_ids
+    security_groups  = [aws_security_group.tasks.id]
+    assign_public_ip = false
+  }
 
   lifecycle {
     ignore_changes = [task_definition]

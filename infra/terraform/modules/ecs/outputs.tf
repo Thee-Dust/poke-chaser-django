@@ -29,3 +29,19 @@ output "task_role_arn" {
 output "log_group_name" {
   value = aws_cloudwatch_log_group.api.name
 }
+
+output "worker_service_name" {
+  value = aws_ecs_service.worker.name
+}
+
+output "beat_service_name" {
+  value = aws_ecs_service.beat.name
+}
+
+output "worker_task_definition_family" {
+  value = aws_ecs_task_definition.worker.family
+}
+
+output "beat_task_definition_family" {
+  value = aws_ecs_task_definition.beat.family
+}

@@ -71,3 +71,31 @@ resource "aws_secretsmanager_secret_version" "pokemon_tcg_api_key" {
   secret_id     = aws_secretsmanager_secret.pokemon_tcg_api_key.id
   secret_string = var.pokemon_tcg_api_key
 }
+
+resource "aws_secretsmanager_secret" "ses_smtp_username" {
+  name                    = "${var.name}/${var.environment}/ses-smtp-username"
+  recovery_window_in_days = 0
+
+  tags = {
+    Environment = var.environment
+  }
+}
+
+resource "aws_secretsmanager_secret_version" "ses_smtp_username" {
+  secret_id     = aws_secretsmanager_secret.ses_smtp_username.id
+  secret_string = var.ses_smtp_username
+}
+
+resource "aws_secretsmanager_secret" "ses_smtp_password" {
+  name                    = "${var.name}/${var.environment}/ses-smtp-password"
+  recovery_window_in_days = 0
+
+  tags = {
+    Environment = var.environment
+  }
+}
+
+resource "aws_secretsmanager_secret_version" "ses_smtp_password" {
+  secret_id     = aws_secretsmanager_secret.ses_smtp_password.id
+  secret_string = var.ses_smtp_password
+}

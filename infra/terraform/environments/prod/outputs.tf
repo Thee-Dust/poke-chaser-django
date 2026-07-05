@@ -59,3 +59,18 @@ output "iam_oidc_role_arn" {
   description = "Set this as AWS_DEPLOY_ROLE_ARN in GitHub Actions repository variables"
   value       = module.iam_oidc.role_arn
 }
+
+# ── Phase 3 outputs ───────────────────────────────────────────────────────────
+
+output "ecs_worker_service_name" {
+  value = module.ecs.worker_service_name
+}
+
+output "ecs_beat_service_name" {
+  value = module.ecs.beat_service_name
+}
+
+output "ses_smtp_endpoint" {
+  description = "SES SMTP endpoint — set EMAIL_HOST to this in ECS (already wired)"
+  value       = "email-smtp.${var.aws_region}.amazonaws.com"
+}
