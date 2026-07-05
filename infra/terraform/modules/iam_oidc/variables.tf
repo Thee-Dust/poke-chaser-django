@@ -15,8 +15,9 @@ variable "ecr_repository_arn" {
   type = string
 }
 
-variable "ecs_service_arn" {
-  type = string
+variable "ecs_cluster_name" {
+  description = "ECS cluster name — used to scope UpdateService to all services in the cluster"
+  type        = string
 }
 
 variable "ecs_execution_role_arn" {

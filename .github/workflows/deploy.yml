@@ -19,7 +19,11 @@ jobs:
       ECR_REPOSITORY: poke-chaser-api
       ECS_CLUSTER: poke-chaser-prod
       ECS_SERVICE: poke-chaser-api-prod
+      ECS_WORKER_SERVICE: poke-chaser-worker-prod
+      ECS_BEAT_SERVICE: poke-chaser-beat-prod
       TASK_FAMILY: poke-chaser-api-prod
+      WORKER_TASK_FAMILY: poke-chaser-worker-prod
+      BEAT_TASK_FAMILY: poke-chaser-beat-prod
       CONTAINER_NAME: api
 
     steps:
@@ -47,7 +51,7 @@ jobs:
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
           echo "IMAGE=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_ENV
 
-      - name: Register new task definition revision
+      - name: Register new API task definition revision
         run: |
           CURRENT=$(aws ecs describe-task-definition \
             --task-definition $TASK_FAMILY \
@@ -110,7 +114,7 @@ jobs:
           fi
           echo "Migrations completed successfully."
 
-      - name: Update ECS service
+      - name: Update API service
         run: |
           aws ecs update-service \
             --cluster $ECS_CLUSTER \
@@ -118,9 +122,81 @@ jobs:
             --task-definition $NEW_TASK_DEF_ARN \
             --force-new-deployment
 
-          echo "Waiting for service to stabilize..."
+          echo "Waiting for API service to stabilize..."
           aws ecs wait services-stable \
             --cluster $ECS_CLUSTER \
             --services $ECS_SERVICE
+
+      - name: Register new worker task definition revision
+        run: |
+          CURRENT=$(aws ecs describe-task-definition \
+            --task-definition $WORKER_TASK_FAMILY \
+            --query taskDefinition \
+            --output json)
+          NEW=$(echo "$CURRENT" | python3 -c '
+          import json, sys, os
+          td = json.load(sys.stdin)
+          image = os.environ["IMAGE"]
+          for c in td["containerDefinitions"]:
+              if c["name"] == "worker":
+                  c["image"] = image
+          for key in [
+              "taskDefinitionArn", "revision", "status",
+              "requiresAttributes", "placementConstraints",
+              "compatibilities", "registeredAt", "registeredBy",
+              "deregisteredAt",
+          ]:
+              td.pop(key, None)
+          print(json.dumps(td))
+          ')
+          WORKER_ARN=$(aws ecs register-task-definition \
+            --cli-input-json "$NEW" \
+            --query taskDefinition.taskDefinitionArn \
+            --output text)
+          echo "WORKER_TASK_DEF_ARN=$WORKER_ARN" >> $GITHUB_ENV
+
+      - name: Update worker service
+        run: |
+          aws ecs update-service \
+            --cluster $ECS_CLUSTER \
+            --service $ECS_WORKER_SERVICE \
+            --task-definition $WORKER_TASK_DEF_ARN \
+            --force-new-deployment
+
+      - name: Register new beat task definition revision
+        run: |
+          CURRENT=$(aws ecs describe-task-definition \
+            --task-definition $BEAT_TASK_FAMILY \
+            --query taskDefinition \
+            --output json)
+          NEW=$(echo "$CURRENT" | python3 -c '
+          import json, sys, os
+          td = json.load(sys.stdin)
+          image = os.environ["IMAGE"]
+          for c in td["containerDefinitions"]:
+              if c["name"] == "beat":
+                  c["image"] = image
+          for key in [
+              "taskDefinitionArn", "revision", "status",
+              "requiresAttributes", "placementConstraints",
+              "compatibilities", "registeredAt", "registeredBy",
+              "deregisteredAt",
+          ]:
+              td.pop(key, None)
+          print(json.dumps(td))
+          ')
+          BEAT_ARN=$(aws ecs register-task-definition \
+            --cli-input-json "$NEW" \
+            --query taskDefinition.taskDefinitionArn \
+            --output text)
+          echo "BEAT_TASK_DEF_ARN=$BEAT_ARN" >> $GITHUB_ENV
+
+      - name: Update beat service
+        run: |
+          aws ecs update-service \
+            --cluster $ECS_CLUSTER \
+            --service $ECS_BEAT_SERVICE \
+            --task-definition $BEAT_TASK_DEF_ARN \
+            --force-new-deployment
 
           echo "Deployed ${{ github.ref_name }} successfully."

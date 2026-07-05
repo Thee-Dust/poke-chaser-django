@@ -77,13 +77,13 @@ resource "aws_iam_role_policy" "github_deploy" {
         Sid    = "ECSUpdateService"
         Effect = "Allow"
         Action = ["ecs:UpdateService"]
-        Resource = [var.ecs_service_arn]
+        Resource = ["arn:aws:ecs:*:${data.aws_caller_identity.current.account_id}:service/${var.ecs_cluster_name}/*"]
       },
       {
         Sid    = "ECSRunTask"
         Effect = "Allow"
         Action = ["ecs:RunTask"]
-        Resource = ["arn:aws:ecs:*:${data.aws_caller_identity.current.account_id}:task-definition/${var.name}-api-${var.environment}:*"]
+        Resource = ["arn:aws:ecs:*:${data.aws_caller_identity.current.account_id}:task-definition/${var.name}-*-${var.environment}:*"]
       },
       {
         Sid    = "ECSRegisterTaskDef"

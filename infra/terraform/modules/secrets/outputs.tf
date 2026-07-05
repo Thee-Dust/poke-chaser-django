@@ -6,5 +6,7 @@ output "arns" {
     POSTGRES_PASSWORD   = aws_secretsmanager_secret.postgres_password.arn
     REDIS_URL           = aws_secretsmanager_secret.redis_url.arn
     POKEMON_TCG_API_KEY = aws_secretsmanager_secret.pokemon_tcg_api_key.arn
+    EMAIL_HOST_USER     = aws_secretsmanager_secret.ses_smtp_username.arn
+    EMAIL_HOST_PASSWORD = aws_secretsmanager_secret.ses_smtp_password.arn
   }
 }
