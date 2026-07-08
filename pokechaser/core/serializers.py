@@ -13,24 +13,39 @@ from .models import User
 username_validator = UnicodeUsernameValidator()
 
 
+def validate_username_value(value, *, exclude_user=None):
+    try:
+        username_validator(value)
+    except DjangoValidationError as exc:
+        raise serializers.ValidationError(list(exc.messages))
+    qs = User.objects.filter(username__iexact=value)
+    if exclude_user is not None:
+        qs = qs.exclude(pk=exclude_user.pk)
+    if qs.exists():
+        raise serializers.ValidationError("A user with this username already exists.")
+    return value
+
+
+def validate_email_value(value, *, exclude_user=None):
+    normalized = value.lower()
+    qs = User.objects.filter(email__iexact=normalized)
+    if exclude_user is not None:
+        qs = qs.exclude(pk=exclude_user.pk)
+    if qs.exists():
+        raise serializers.ValidationError("A user with this email already exists.")
+    return normalized
+
+
 class RegisterSerializer(serializers.Serializer):
     email = serializers.EmailField()
     username = serializers.CharField(max_length=150)
     password = serializers.CharField(write_only=True)
 
     def validate_email(self, value):
-        if User.objects.filter(email__iexact=value).exists():
-            raise serializers.ValidationError("A user with this email already exists.")
-        return value.lower()
+        return validate_email_value(value)
 
     def validate_username(self, value):
-        try:
-            username_validator(value)
-        except DjangoValidationError as exc:
-            raise serializers.ValidationError(list(exc.messages))
-        if User.objects.filter(username__iexact=value).exists():
-            raise serializers.ValidationError("A user with this username already exists.")
-        return value
+        return validate_username_value(value)
 
     def validate_password(self, value):
         try:
@@ -79,7 +94,25 @@ class LoginSerializer(serializers.Serializer):
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ["id", "email", "username", "date_joined"]
+        fields = ["id", "email", "username", "first_name", "last_name", "date_joined"]
+
+
+class UserUpdateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ["username", "email", "first_name", "last_name"]
+
+    def validate_username(self, value):
+        return validate_username_value(value, exclude_user=self.instance)
+
+    def validate_email(self, value):
+        return validate_email_value(value, exclude_user=self.instance)
+
+    def validate_first_name(self, value):
+        return value.strip()
+
+    def validate_last_name(self, value):
+        return value.strip()
 
 
 class PasswordResetRequestSerializer(serializers.Serializer):
