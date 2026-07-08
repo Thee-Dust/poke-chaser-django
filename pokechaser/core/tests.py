@@ -154,3 +154,82 @@ class AuthTest(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.data["username"], "testuser")
         self.assertEqual(resp.data["email"], "test@example.com")
+        self.assertIn("first_name", resp.data)
+        self.assertIn("last_name", resp.data)
+
+
+class ProfileUpdateTest(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(
+            username="testuser", email="test@example.com", password="Str0ngPass!"
+        )
+        self.other = User.objects.create_user(
+            username="otheruser", email="other@example.com", password="Str0ngPass!"
+        )
+
+    def test_patch_without_auth_returns_403(self):
+        resp = self.client.patch(
+            "/auth/me/",
+            {"username": "newname"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 403)
+
+    def test_patch_username_and_email(self):
+        self.client.force_authenticate(user=self.user)
+        resp = self.client.patch(
+            "/auth/me/",
+            {"username": "newname", "email": "new@example.com"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data["username"], "newname")
+        self.assertEqual(resp.data["email"], "new@example.com")
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.username, "newname")
+        self.assertEqual(self.user.email, "new@example.com")
+
+    def test_patch_first_and_last_name(self):
+        self.client.force_authenticate(user=self.user)
+        resp = self.client.patch(
+            "/auth/me/",
+            {"first_name": "Ash", "last_name": "Ketchum"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data["first_name"], "Ash")
+        self.assertEqual(resp.data["last_name"], "Ketchum")
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.first_name, "Ash")
+        self.assertEqual(self.user.last_name, "Ketchum")
+
+    def test_patch_duplicate_username_returns_400(self):
+        self.client.force_authenticate(user=self.user)
+        resp = self.client.patch(
+            "/auth/me/",
+            {"username": "otheruser"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("username", resp.data)
+
+    def test_patch_duplicate_email_returns_400(self):
+        self.client.force_authenticate(user=self.user)
+        resp = self.client.patch(
+            "/auth/me/",
+            {"email": "other@example.com"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("email", resp.data)
+
+    def test_patch_own_username_unchanged_succeeds(self):
+        self.client.force_authenticate(user=self.user)
+        resp = self.client.patch(
+            "/auth/me/",
+            {"username": "testuser"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data["username"], "testuser")
