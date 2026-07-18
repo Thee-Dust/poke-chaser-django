@@ -46,6 +46,8 @@ locals {
     { name = "FRONTEND_URL", value = "https://${var.frontend_domain}" },
     { name = "CORS_ALLOWED_ORIGINS", value = "https://${var.frontend_domain},https://www.${var.frontend_domain}" },
     { name = "CSRF_TRUSTED_ORIGINS", value = "https://${var.frontend_domain},https://www.${var.frontend_domain}" },
+    { name = "CSRF_COOKIE_DOMAIN", value = ".${var.frontend_domain}" },
+    { name = "SESSION_COOKIE_DOMAIN", value = ".${var.frontend_domain}" },
     { name = "POSTGRES_DB", value = var.db_name },
     { name = "POSTGRES_USER", value = var.db_username },
     { name = "POSTGRES_PORT", value = "5432" },
