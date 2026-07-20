@@ -95,6 +95,17 @@ class AuthTest(TestCase):
         user = User.objects.get(username="newuser")
         self.assertTrue(Collection.objects.filter(user=user, is_default=True).exists())
 
+    def test_register_logs_user_in(self):
+        resp = self.client.post(
+            "/auth/register/",
+            {"username": "newuser", "email": "new@example.com", "password": "Str0ngPass!"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 201)
+        me_resp = self.client.get("/auth/me/")
+        self.assertEqual(me_resp.status_code, 200)
+        self.assertEqual(me_resp.data["username"], "newuser")
+
     def test_register_duplicate_email_returns_400(self):
         User.objects.create_user(username="existing", email="taken@example.com", password="pass")
         resp = self.client.post(

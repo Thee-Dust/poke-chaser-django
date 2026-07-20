@@ -13,13 +13,6 @@ resource "aws_security_group" "rds" {
   description = "Allow PostgreSQL from ECS tasks"
   vpc_id      = var.vpc_id
 
-  ingress {
-    from_port       = 5432
-    to_port         = 5432
-    protocol        = "tcp"
-    security_groups = var.allowed_security_group_ids
-  }
-
   egress {
     from_port   = 0
     to_port     = 0
@@ -31,6 +24,18 @@ resource "aws_security_group" "rds" {
     Name        = "${var.name}-rds-sg"
     Environment = var.environment
   }
+}
+
+# Managed separately so console-added bastion rules are not wiped.
+resource "aws_vpc_security_group_ingress_rule" "ecs" {
+  for_each = toset(var.allowed_security_group_ids)
+
+  security_group_id            = aws_security_group.rds.id
+  referenced_security_group_id = each.value
+  ip_protocol                  = "tcp"
+  from_port                    = 5432
+  to_port                      = 5432
+  description                  = "ECS tasks"
 }
 
 resource "aws_db_instance" "main" {
