@@ -96,6 +96,20 @@ class CardSetViewSet(viewsets.ReadOnlyModelViewSet):
         ordering = SORT_OPTIONS.get(sort, SORT_OPTIONS["release_date_desc"])
         return CardSet.objects.all().order_by(*ordering)
 
+    @action(detail=False, url_path="suggest")
+    def suggest(self, request):
+        q = request.query_params.get("q", "").strip()
+        if len(q.replace(" ", "")) < 3:
+            return Response({"results": []})
+        limit = min(int(request.query_params.get("limit", 5)), 10)
+        sets = (
+            CardSet.objects
+            .filter(name__istartswith=q)
+            .values("id", "name", "series")
+            .order_by("name")[:limit]
+        )
+        return Response({"results": list(sets)})
+
     @action(detail=True, pagination_class=CardPagination)
     def cards(self, request, pk=None):
         card_set = self.get_object()
