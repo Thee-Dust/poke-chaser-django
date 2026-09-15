@@ -27,7 +27,7 @@ class CardSet(BaseModel):
 class Card(BaseModel):
     id = models.CharField(max_length=50, primary_key=True)
     set = models.ForeignKey(CardSet, on_delete=models.CASCADE, related_name="cards")
-    name = models.CharField(max_length=255)
+    name = models.CharField(max_length=255, db_index=True)
     supertype = models.CharField(max_length=50)
     subtypes = models.JSONField(default=list)
     level = models.CharField(max_length=10, blank=True)
