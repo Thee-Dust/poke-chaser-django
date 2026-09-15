@@ -117,3 +117,18 @@ class CardViewSet(viewsets.ReadOnlyModelViewSet):
         queryset = Card.objects.select_related("set")
         queryset = search_cards(queryset, self.request.query_params.get("search"))
         return sort_cards(queryset, self.request.query_params.get("sort", "number_asc"))
+
+    @action(detail=False, url_path="suggest")
+    def suggest(self, request):
+        q = request.query_params.get("q", "").strip()
+        if len(q.replace(" ", "")) < 3:
+            return Response({"results": []})
+        limit = min(int(request.query_params.get("limit", 10)), 15)
+        names = (
+            Card.objects
+            .filter(name__istartswith=q)
+            .values_list("name", flat=True)
+            .distinct()
+            .order_by("name")[:limit]
+        )
+        return Response({"results": list(names)})

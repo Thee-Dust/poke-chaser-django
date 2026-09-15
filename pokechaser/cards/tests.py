@@ -145,6 +145,76 @@ class CardSetSortTest(TestCase):
         self.assertEqual(names, sorted(names))
 
 
+class CardSuggestTest(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.card_set = make_card_set()
+        make_card("c1", "Charizard", self.card_set, number="1")
+        make_card("c2", "Charizard", self.card_set, number="2")   # duplicate name
+        make_card("c3", "Charizard ex", self.card_set, number="3")
+        make_card("c4", "Charmander", self.card_set, number="4")
+        make_card("c5", "Pikachu", self.card_set, number="5")
+        make_card("c6", "Bravery Charm", self.card_set, number="6")  # contains "char" mid-word
+
+    def test_too_short_returns_empty(self):
+        resp = self.client.get("/cards/card/suggest/?q=ch")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data["results"], [])
+
+    def test_spaces_do_not_count_toward_minimum(self):
+        resp = self.client.get("/cards/card/suggest/?q=ch+")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data["results"], [])
+
+    def test_prefix_match_returns_results(self):
+        resp = self.client.get("/cards/card/suggest/?q=Char")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("Charizard", resp.data["results"])
+        self.assertIn("Charizard ex", resp.data["results"])
+        self.assertIn("Charmander", resp.data["results"])
+
+    def test_istartswith_excludes_mid_word_matches(self):
+        resp = self.client.get("/cards/card/suggest/?q=Char")
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotIn("Bravery Charm", resp.data["results"])
+
+    def test_deduplicates_names(self):
+        resp = self.client.get("/cards/card/suggest/?q=Char")
+        self.assertEqual(resp.status_code, 200)
+        names = resp.data["results"]
+        self.assertEqual(len(names), len(set(names)))
+        self.assertEqual(names.count("Charizard"), 1)
+
+    def test_results_are_alphabetical(self):
+        resp = self.client.get("/cards/card/suggest/?q=Char")
+        self.assertEqual(resp.status_code, 200)
+        names = resp.data["results"]
+        self.assertEqual(names, sorted(names))
+
+    def test_limit_param_is_respected(self):
+        resp = self.client.get("/cards/card/suggest/?q=Char&limit=2")
+        self.assertEqual(resp.status_code, 200)
+        self.assertLessEqual(len(resp.data["results"]), 2)
+
+    def test_limit_is_capped_at_15(self):
+        # create 20 cards with names that all start with "Poke"
+        for i in range(20):
+            make_card(f"pk{i}", f"Pokemon{i:02d}", self.card_set, number=str(100 + i))
+        resp = self.client.get("/cards/card/suggest/?q=Poke&limit=99")
+        self.assertEqual(resp.status_code, 200)
+        self.assertLessEqual(len(resp.data["results"]), 15)
+
+    def test_case_insensitive(self):
+        resp = self.client.get("/cards/card/suggest/?q=char")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("Charizard", resp.data["results"])
+
+    def test_no_match_returns_empty_list(self):
+        resp = self.client.get("/cards/card/suggest/?q=Zzz")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data["results"], [])
+
+
 class SyncTestCase(TestCase):
     def setUp(self):
         self.api = CardApi()
