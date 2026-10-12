@@ -106,6 +106,83 @@ class CardSortTest(TestCase):
         self.assertEqual(names[2], "Charizard")
         self.assertEqual(names[-1], "Mewtwo")
 
+    def test_sort_price_desc_json_null_market_sorts_last(self):
+        Card.objects.create(
+            id="c6",
+            name="Snorlax",
+            set=self.card_set,
+            supertype="Pokémon",
+            number="6",
+            tcgplayer={"prices": {"normal": {"market": None}}},
+        )
+        resp = self.client.get("/cards/card/?sort=price_desc")
+        self.assertEqual(resp.status_code, 200)
+        names = [r["name"] for r in resp.data["results"]]
+        self.assertEqual(names[-1], "Snorlax")
+
+    def test_sort_price_asc_json_null_market_sorts_last(self):
+        Card.objects.create(
+            id="c6",
+            name="Snorlax",
+            set=self.card_set,
+            supertype="Pokémon",
+            number="6",
+            tcgplayer={"prices": {"normal": {"market": None}}},
+        )
+        resp = self.client.get("/cards/card/?sort=price_asc")
+        self.assertEqual(resp.status_code, 200)
+        names = [r["name"] for r in resp.data["results"]]
+        self.assertEqual(names[-1], "Snorlax")
+
+    def test_sort_price_desc_1st_edition_holo_sorted_correctly(self):
+        make_card("c7", "Dark Blastoise", self.card_set, number="7", price=None)
+        Card.objects.filter(id="c7").update(
+            tcgplayer={"prices": {"1stEditionHolofoil": {"market": 482.0}}}
+        )
+        resp = self.client.get("/cards/card/?sort=price_desc")
+        self.assertEqual(resp.status_code, 200)
+        names = [r["name"] for r in resp.data["results"]]
+        # 1stEditionHolofoil $482 should beat normal $50 (Bulbasaur) and $10 (Pikachu)
+        dark_idx = names.index("Dark Blastoise")
+        bulbasaur_idx = names.index("Bulbasaur")
+        self.assertLess(dark_idx, bulbasaur_idx)
+
+    def test_sort_price_asc_1st_edition_holo_sorted_correctly(self):
+        make_card("c7", "Dark Blastoise", self.card_set, number="7", price=None)
+        Card.objects.filter(id="c7").update(
+            tcgplayer={"prices": {"1stEditionHolofoil": {"market": 482.0}}}
+        )
+        resp = self.client.get("/cards/card/?sort=price_asc")
+        self.assertEqual(resp.status_code, 200)
+        names = [r["name"] for r in resp.data["results"]]
+        # $482 should appear after $50 and $10 in ascending order
+        dark_idx = names.index("Dark Blastoise")
+        bulbasaur_idx = names.index("Bulbasaur")
+        self.assertGreater(dark_idx, bulbasaur_idx)
+
+    def test_sort_price_desc_numeric_not_lexicographic(self):
+        # 9.99 > "100" lexicographically but 100 > 9.99 numerically — the bug reproduced
+        make_card("c5", "Venusaur", self.card_set, number="5", price=9.99)
+        resp = self.client.get("/cards/card/?sort=price_desc")
+        prices = [
+            r["tcgplayer"]["prices"]["normal"]["market"]
+            for r in resp.data["results"]
+            if r.get("tcgplayer")
+        ]
+        for a, b in zip(prices, prices[1:]):
+            self.assertGreaterEqual(a, b, f"price_desc not numeric: {a} should be >= {b}")
+
+    def test_sort_price_asc_numeric_not_lexicographic(self):
+        make_card("c5", "Venusaur", self.card_set, number="5", price=9.99)
+        resp = self.client.get("/cards/card/?sort=price_asc")
+        prices = [
+            r["tcgplayer"]["prices"]["normal"]["market"]
+            for r in resp.data["results"]
+            if r.get("tcgplayer")
+        ]
+        for a, b in zip(prices, prices[1:]):
+            self.assertLessEqual(a, b, f"price_asc not numeric: {a} should be <= {b}")
+
     def test_unknown_sort_falls_back_to_number_order(self):
         resp = self.client.get("/cards/card/?sort=invalid_sort")
         results = resp.data["results"]
