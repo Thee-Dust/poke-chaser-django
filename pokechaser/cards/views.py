@@ -3,10 +3,12 @@ from rest_framework.decorators import action
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.utils.urls import replace_query_param, remove_query_param
-from django.db.models import F, FloatField, Q, Value
-from django.db.models.functions import Coalesce, Length
+from django.db.models import F, FloatField, Q
+from django.db.models.fields.json import KeyTextTransform
+from django.db.models.functions import Cast, Greatest, Length
 from .models import Card, CardSet
 from .serializers import CardSerializer, CardSetSerializer
+from .price_types import ALL_PRICE_TYPES
 
 SORT_OPTIONS = {
     "release_date_desc": ["-release_date", "name"],
@@ -59,6 +61,16 @@ def search_cards(queryset, search, prefix=""):
     )
 
 
+def _price_cast(prefix, variant):
+    return Cast(
+        KeyTextTransform(
+            "market",
+            KeyTextTransform(variant, KeyTextTransform("prices", f"{prefix}tcgplayer")),
+        ),
+        FloatField(),
+    )
+
+
 def sort_cards(queryset, sort, prefix=""):
     number_order = (Length(f"{prefix}number"), f"{prefix}number")
     if sort == "name_asc":
@@ -66,12 +78,10 @@ def sort_cards(queryset, sort, prefix=""):
     if sort == "name_desc":
         return queryset.order_by(f"-{prefix}name")
     if sort in ("price_desc", "price_asc"):
+        id_field = f"{prefix}id" if prefix else "id"
         queryset = queryset.annotate(
-            market_price=Coalesce(
-                F(f"{prefix}tcgplayer__prices__normal__market"),
-                F(f"{prefix}tcgplayer__prices__holofoil__market"),
-                F(f"{prefix}tcgplayer__prices__reverseHolofoil__market"),
-                Value(None),
+            market_price=Greatest(
+                *[_price_cast(prefix, v) for v in ALL_PRICE_TYPES],
                 output_field=FloatField(),
             )
         )
@@ -79,10 +89,12 @@ def sort_cards(queryset, sort, prefix=""):
             return queryset.order_by(
                 F("market_price").desc(nulls_last=True),
                 *number_order,
+                id_field,
             )
         return queryset.order_by(
             F("market_price").asc(nulls_last=True),
             *number_order,
+            id_field,
         )
     # default: "number_asc" or unknown
     return queryset.order_by(*number_order)

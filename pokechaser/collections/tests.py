@@ -5,6 +5,7 @@ from rest_framework.test import APIClient
 
 from pokechaser.cards.models import Card, CardSet
 from pokechaser.collections.models import Collection, CollectionItem, CollectionItemPurchase
+from pokechaser.collections.utils import get_tcgplayer_market_price
 from pokechaser.core.models import User
 
 
@@ -145,6 +146,50 @@ class CollectionCalculationTest(TestCase):
 
         resp = self.client.get(f"/collections/{self.collection.id}/")
         self.assertEqual(Decimal(resp.data["gain_loss"]), Decimal("40.00"))
+
+
+class GetTcgplayerMarketPriceTest(TestCase):
+    def _card(self, tcgplayer):
+        card_set = make_card_set("price-test-set")
+        return Card.objects.create(
+            id="price-test-card",
+            name="Test Card",
+            set=card_set,
+            supertype="Pokémon",
+            number="1",
+            tcgplayer=tcgplayer,
+        )
+
+    def test_returns_none_when_no_tcgplayer(self):
+        card = self._card(None)
+        self.assertIsNone(get_tcgplayer_market_price(card))
+
+    def test_normal_price(self):
+        card = self._card({"prices": {"normal": {"market": 10.0}}})
+        self.assertEqual(get_tcgplayer_market_price(card), 10.0)
+
+    def test_unlimited_holofoil_price(self):
+        card = self._card({"prices": {"unlimitedHolofoil": {"market": 213.64}}})
+        self.assertEqual(get_tcgplayer_market_price(card), 213.64)
+
+    def test_1st_edition_holofoil_price(self):
+        card = self._card({"prices": {"1stEditionHolofoil": {"market": 482.59}}})
+        self.assertEqual(get_tcgplayer_market_price(card), 482.59)
+
+    def test_returns_max_when_multiple_types_present(self):
+        card = self._card({"prices": {
+            "normal": {"market": 5.0},
+            "holofoil": {"market": 200.0},
+            "1stEditionHolofoil": {"market": 482.59},
+        }})
+        self.assertEqual(get_tcgplayer_market_price(card), 482.59)
+
+    def test_json_null_market_treated_as_missing(self):
+        card = self._card({"prices": {
+            "normal": {"market": None},
+            "holofoil": {"market": 50.0},
+        }})
+        self.assertEqual(get_tcgplayer_market_price(card), 50.0)
 
 
 class CollectionItemWriteTest(TestCase):
